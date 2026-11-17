@@ -1,0 +1,131 @@
+{"ts": "2026-11-06 10:12:30", "kind": "provider_error", "provider": "X kiro", "model": "minimax/minimax-m3.1-flash", "status": 404, "context": "daily_profile"}
+{"ts": "2026-11-06 10:12:31", "kind": "provider_error", "provider": "Vyce", "model": "claude-sonnet-4-6", "status": 400, "context": "daily_profile"}
+{"ts": "2026-11-06 10:12:31", "kind": "all_failed", "context": "daily_profile", "error": "could not pick a character"}
+{"ts": "2026-11-06 14:56:26", "kind": "provider_success", "provider": "Vyce", "model": "claude-sonnet-4-6", "task": false}
+{"ts": "2026-11-06 14:58:34", "kind": "provider_success", "provider": "Vyce", "model": "claude-sonnet-4-6", "task": true}
+{"ts": "2026-11-06 21:05:39", "kind": "provider_error", "provider": "Vyce", "model": "claude-sonnet-4-6", "status": 400}
+{"ts": "2026-11-06 21:06:04", "kind": "provider_success", "provider": "X kiro", "model": "qwen/qwen3.8-omni-flash:free", "task": false}
+{"ts": "2026-11-06 21:07:17", "kind": "provider_success", "provider": "X kiro", "model": "qwen/qwen3.8-omni-flash:free", "task": false}
+{"ts": "2026-11-06 21:08:14", "kind": "provider_error", "provider": "X kiro", "model": "qwen/qwen3.8-omni-flash:free", "error": "ReadTimeout"}
+{"ts": "2026-11-06 21:08:17", "kind": "provider_error", "provider": "Vyce", "model": "claude-sonnet-4-6", "status": 400}
+{"ts": "2026-11-06 21:08:17", "kind": "all_failed", "error": "Vyce / claude-sonnet-4-6: HTTP 400"}
+{"ts": "2026-11-06 21:08:51", "kind": "provider_error", "provider": "X kiro", "model": "qwen/qwen3.8-omni-flash:free", "error": "ReadTimeout"}
+{"ts": "2026-11-06 21:08:52", "kind": "provider_error", "provider": "Vyce", "model": "claude-sonnet-4-6", "status": 400}
+{"ts": "2026-11-06 21:08:52", "kind": "all_failed", "error": "Vyce / claude-sonnet-4-6: HTTP 400"}
+{"ts": "2026-11-06 21:09:30", "kind": "provider_success", "provider": "X kiro", "model": "qwen/qwen3.8-omni-flash:free", "task": false}
+{"ts": "2026-11-06 21:11:39", "kind": "provider_success", "provider": "X kiro", "model": "qwen/qwen3.8-omni-flash:free", "task": false}
+{"ts": "2026-11-06 21:12:07", "kind": "provider_success", "provider": "X kiro", "model": "qwen/qwen3.8-omni-flash:free", "task": false}
+{"ts": "2026-11-06 21:22:08", "kind": "provider_success", "provider": "X kiro", "model": "qwen/qwen3.8-omni-flash:free", "task": false}
+{"ts": "2026-11-07 00:15:50", "kind": "provider_error", "provider": "Vyce", "model": "claude-sonnet-4-6", "error": "ReadTimeout"}
+{"ts": "2026-11-07 00:15:56", "kind": "provider_success", "provider": "X kiro", "model": "qwen/qwen3.8-omni-flash:free", "task": false}
+{"ts": "2026-11-07 00:55:31", "kind": "provider_error", "provider": "Vyce", "model": "claude-sonnet-4-6", "status": 400}
+{"ts": "2026-11-07 00:55:36", "kind": "provider_success", "provider": "X kiro", "model": "qwen/qwen3.8-omni-flash:free", "task": false}
+{"ts": "2026-11-07 00:56:50", "kind": "provider_error", "provider": "Vyce", "model": "claude-sonnet-4-6", "status": 400}
+{"ts": "2026-11-07 00:56:53", "kind": "provider_success", "provider": "X kiro", "model": "qwen/qwen3.8-omni-flash:free", "task": false}
+{"ts": "2026-11-07 00:57:35", "kind": "provider_error", "provider": "Vyce", "model": "claude-sonnet-4-6", "status": 400}
+{"ts": "2026-11-07 00:57:38", "kind": "provider_success", "provider": "X kiro", "model": "qwen/qwen3.8-omni-flash:free", "task": false}
+{"ts": "2026-11-07 00:57:43", "kind": "provider_error", "provider": "Vyce", "model": "claude-sonnet-4-6", "status": 400}
+{"ts": "2026-11-07 00:57:45", "kind": "provider_success", "provider": "X kiro", "model": "qwen/qwen3.8-omni-flash:free", "task": false}
+{"ts": "2026-11-07 10:23:08", "kind": "provider_success", "provider": "X kiro", "model": "qwen/qwen3.8-omni-flash:free", "task": false}
+{"ts": "2026-11-07 10:23:11", "kind": "provider_success", "provider": "X kiro", "model": "qwen/qwen3.8-omni-flash:free", "task": false}
+{"ts": "2026-11-07 10:25:55", "kind": "provider_success", "provider": "X kiro", "model": "qwen/qwen3.8-omni-flash:free", "task": false}
+{"ts": "2026-11-07 10:25:59", "kind": "provider_success", "provider": "X kiro", "model": "qwen/qwen3.8-omni-flash:free", "task": false}
+{"ts": "2026-11-07 14:34:48", "kind": "provider_success", "provider": "X kiro", "model": "qwen/qwen3.8-omni-flash:free", "task": false}
+{"ts": "2026-11-07 14:34:51", "kind": "provider_success", "provider": "X kiro", "model": "qwen/qwen3.8-omni-flash:free", "task": false}
+{"ts": "2026-11-07 16:12:11", "kind": "provider_success", "provider": "X kiro", "model": "qwen/qwen3.8-omni-flash:free", "task": false}
+{"ts": "2026-11-07 16:14:13", "kind": "provider_success", "provider": "X kiro", "model": "qwen/qwen3.8-omni-flash:free", "task": true}
+{"ts": "2026-11-07 23:13:25", "kind": "provider_error", "provider": "X kiro", "model": "qwen/qwen3.8-omni-flash:free", "status": 404}
+{"ts": "2026-11-07 23:13:46", "kind": "provider_success", "provider": "Vyce", "model": "claude-sonnet-4-6", "task": false}
+{"ts": "2026-11-07 23:15:21", "kind": "provider_success", "provider": "Vyce", "model": "claude-sonnet-4-6", "task": false}
+{"ts": "2026-11-07 23:15:34", "kind": "provider_error", "provider": "X kiro", "model": "qwen/qwen3.8-omni-flash:free", "status": 404, "context": "daily_profile"}
+{"ts": "2026-11-07 23:15:35", "kind": "all_failed", "context": "daily_profile", "error": "Vyce / claude-sonnet-4-6: reply format thik na (khali)\nX kiro / qwen/qwen3.8-omni-flash:free: HTTP 404"}
+{"ts": "2026-11-07 23:24:04", "kind": "provider_success", "provider": "X kiro", "model": "mistralai/mistral-large-2512", "task": false}
+{"ts": "2026-11-07 23:24:23", "kind": "provider_success", "provider": "X kiro", "model": "mistralai/mistral-large-2512", "task": false}
+{"ts": "2026-11-07 23:25:07", "kind": "provider_success", "provider": "X kiro", "model": "mistralai/mistral-large-2512", "task": false}
+{"ts": "2026-11-07 23:26:05", "kind": "provider_success", "provider": "X kiro", "model": "mistralai/mistral-large-2512", "task": false}
+{"ts": "2026-11-07 23:35:09", "kind": "provider_success", "provider": "X kiro", "model": "mistralai/mistral-large-2512", "task": false}
+{"ts": "2026-11-08 00:07:51", "kind": "provider_success", "provider": "X kiro", "model": "mistralai/mistral-large-2512", "task": false}
+{"ts": "2026-11-08 01:19:06", "kind": "all_failed", "context": "daily_profile", "error": "image: cometapi: HTTP 400: Your request was rejected by the safety system. If you believe this is an error, contact us at ***.***.com and include t"}
+{"ts": "2026-11-08 14:30:06", "kind": "all_failed", "context": "daily_profile", "error": "image: cometapi: HTTP 400: Your request was rejected by the safety system. If you believe this is an error, contact us at ***.***.com and include t"}
+{"ts": "2026-11-08 15:12:31", "kind": "all_failed", "context": "daily_profile", "error": "image: cometapi: HTTP 400: Your request was rejected by the safety system. If you believe this is an error, contact us at ***.***.com and include t"}
+{"ts": "2026-11-08 15:18:44", "kind": "provider_success", "provider": "X kiro", "model": "mistralai/mistral-large-2512", "task": false}
+{"ts": "2026-11-08 15:22:41", "kind": "all_failed", "context": "daily_profile", "error": "image: cometapi: HTTP 400: Your request was rejected by the safety system. If you believe this is an error, contact us at ***.***.com and include t"}
+{"ts": "2026-11-08 15:28:23", "kind": "provider_success", "provider": "Vyce", "model": "deepseek-v4.1", "task": false}
+{"ts": "2026-11-08 17:57:20", "kind": "all_failed", "context": "daily_profile", "error": "X kiro / mistralai/mistral-large-2512: reply format thik na (The web search results only provide information about Elfaria Albis Serfort, wh…)\nVyce / deepseek-v4.1: reply format thik na (khali)"}
+{"ts": "2026-11-08 18:00:19", "kind": "all_failed", "context": "daily_profile", "error": "image: Cloudflare Workers AI: HTTP 400: AiError: Bad input: Error: required properties at '/' are 'multipart' (5cb441c1-9490-40ac-8e4a-c4d4846fd6e5)"}
+{"ts": "2026-11-08 18:01:08", "kind": "all_failed", "context": "daily_profile", "error": "image: Cloudflare Workers AI: HTTP 400: AiError: Bad input: Error: required properties at '/' are 'multipart' (d11f1960-eb1a-46b6-a181-3d20d917e89d)"}
+{"ts": "2026-11-08 18:43:35", "kind": "all_failed", "context": "daily_profile", "error": "image: Cloudflare Workers AI: HTTP 400: AiError: Bad input: Error: required properties at '/' are 'multipart' (bca25a6f-ce19-4024-9933-7e60b9a9b122)"}
+{"ts": "2026-11-08 18:50:11", "kind": "provider_empty", "provider": "X kiro", "model": "mistralai/mistral-large-2512", "reason": "repeated character: Could not search the web this time."}
+{"ts": "2026-11-08 19:11:09", "kind": "provider_empty", "provider": "X kiro", "model": "mistralai/mistral-large-2512", "reason": "repeated character: Could not search the web this time."}
+{"ts": "2026-11-08 19:16:37", "kind": "provider_empty", "provider": "X kiro", "model": "mistralai/mistral-large-2512", "reason": "repeated character: Could not search the web this time."}
+{"ts": "2026-11-08 19:24:23", "kind": "provider_empty", "provider": "X kiro", "model": "mistralai/mistral-large-2512", "reason": "repeated character: Could not search the web this time."}
+{"ts": "2026-11-08 19:25:14", "kind": "provider_error", "provider": "Vyce", "model": "deepseek-v4.1", "status": 400, "context": "daily_profile"}
+{"ts": "2026-11-08 19:25:15", "kind": "all_failed", "context": "daily_profile", "error": "X kiro / mistralai/mistral-large-2512: ager character abar dilo (Could not search the web this time.)\nVyce / deepseek-v4.1: HTTP 400"}
+{"ts": "2026-11-08 19:25:28", "kind": "provider_empty", "provider": "X kiro", "model": "mistralai/mistral-large-2512", "reason": "repeated character: Could not search the web this time."}
+{"ts": "2026-11-08 19:26:34", "kind": "provider_error", "provider": "Vyce", "model": "deepseek-v4.1", "status": 400, "context": "daily_profile"}
+{"ts": "2026-11-08 19:26:35", "kind": "all_failed", "context": "daily_profile", "error": "X kiro / mistralai/mistral-large-2512: ager character abar dilo (Could not search the web this time.)\nVyce / deepseek-v4.1: HTTP 400"}
+{"ts": "2026-11-08 19:43:37", "kind": "provider_empty", "provider": "X kiro", "model": "mistralai/mistral-large-2512", "reason": "repeated character: Could not search the web this time."}
+{"ts": "2026-11-08 19:44:33", "kind": "provider_error", "provider": "Vyce", "model": "deepseek-v4.1", "status": 400, "context": "daily_profile"}
+{"ts": "2026-11-08 19:44:34", "kind": "all_failed", "context": "daily_profile", "error": "X kiro / mistralai/mistral-large-2512: ager character abar dilo (Could not search the web this time.)\nVyce / deepseek-v4.1: HTTP 400"}
+{"ts": "2026-11-08 19:53:25", "kind": "provider_empty", "provider": "X kiro", "model": "mistralai/mistral-large-2512", "reason": "repeated character: Could not search the web this time."}
+{"ts": "2026-11-08 19:55:04", "kind": "all_failed", "context": "daily_profile", "error": "image: Cloudflare Workers AI: HTTP 400: AiError: Bad input: Error: required properties at '/' are 'multipart' (e173acf2-aea8-4e62-abe8-32e03779eaee)"}
+{"ts": "2026-11-08 19:57:17", "kind": "provider_success", "provider": "X kiro", "model": "mistralai/mistral-large-2512", "task": false}
+{"ts": "2026-11-08 19:57:44", "kind": "provider_success", "provider": "X kiro", "model": "mistralai/mistral-large-2512", "task": false}
+{"ts": "2026-11-08 19:57:46", "kind": "provider_empty", "provider": "X kiro", "model": "mistralai/mistral-large-2512", "reason": "repeated character: Could not search the web this time."}
+{"ts": "2026-11-08 19:57:48", "kind": "provider_success", "provider": "X kiro", "model": "mistralai/mistral-large-2512", "task": false}
+{"ts": "2026-11-08 19:57:56", "kind": "provider_success", "provider": "X kiro", "model": "mistralai/mistral-large-2512", "task": false}
+{"ts": "2026-11-08 19:58:16", "kind": "provider_error", "provider": "Vyce", "model": "deepseek-v4.1", "status": 400, "context": "daily_profile"}
+{"ts": "2026-11-08 19:58:16", "kind": "provider_success", "provider": "X kiro", "model": "mistralai/mistral-large-2512", "task": true}
+{"ts": "2026-11-08 19:58:16", "kind": "all_failed", "context": "daily_profile", "error": "X kiro / mistralai/mistral-large-2512: ager character abar dilo (Could not search the web this time.)\nVyce / deepseek-v4.1: HTTP 400"}
+{"ts": "2026-11-08 20:00:02", "kind": "provider_success", "provider": "X kiro", "model": "mistralai/mistral-large-2512", "task": false}
+{"ts": "2026-11-08 20:01:11", "kind": "provider_success", "provider": "X kiro", "model": "mistralai/mistral-large-2512", "task": false}
+{"ts": "2026-11-08 20:01:27", "kind": "provider_success", "provider": "X kiro", "model": "mistralai/mistral-large-2512", "task": false}
+{"ts": "2026-11-08 20:01:36", "kind": "provider_success", "provider": "X kiro", "model": "mistralai/mistral-large-2512", "task": false}
+{"ts": "2026-11-08 20:02:13", "kind": "provider_success", "provider": "X kiro", "model": "mistralai/mistral-large-2512", "task": false}
+{"ts": "2026-11-08 20:02:36", "kind": "provider_success", "provider": "X kiro", "model": "mistralai/mistral-large-2512", "task": false}
+{"ts": "2026-11-08 20:13:20", "kind": "provider_success", "provider": "X kiro", "model": "mistralai/mistral-large-2512", "task": false}
+{"ts": "2026-11-08 20:13:26", "kind": "provider_success", "provider": "X kiro", "model": "mistralai/mistral-large-2512", "task": false}
+{"ts": "2026-11-08 21:11:40", "kind": "provider_success", "provider": "X kiro", "model": "mistralai/mistral-large-2512", "task": false}
+{"ts": "2026-11-08 21:12:15", "kind": "provider_empty", "provider": "X kiro", "model": "mistralai/mistral-large-2512", "reason": "repeated character: Could not search the web this time."}
+{"ts": "2026-11-08 22:15:21", "kind": "provider_success", "provider": "X kiro", "model": "mistralai/mistral-large-2512", "task": false}
+{"ts": "2026-11-08 22:16:28", "kind": "provider_success", "provider": "X kiro", "model": "mistralai/mistral-large-2512", "task": false}
+{"ts": "2026-11-08 22:16:40", "kind": "provider_success", "provider": "X kiro", "model": "mistralai/mistral-large-2512", "task": false}
+{"ts": "2026-11-09 01:38:48", "kind": "provider_empty", "provider": "X kiro", "model": "mistralai/mistral-large-2512", "reason": "repeated character: Could not search the web this time."}
+{"ts": "2026-11-09 01:51:21", "kind": "provider_success", "provider": "X kiro", "model": "mistralai/mistral-large-2512", "task": false}
+{"ts": "2026-11-09 01:51:31", "kind": "provider_success", "provider": "X kiro", "model": "mistralai/mistral-large-2512", "task": false}
+{"ts": "2026-11-09 06:00:08", "kind": "provider_error", "provider": "Agent", "model": "gpt-6-astra", "status": 401, "context": "daily_profile"}
+{"ts": "2026-11-09 10:00:23", "kind": "provider_error", "provider": "Agent", "model": "gpt-6-astra", "status": 401, "context": "daily_profile"}
+{"ts": "2026-11-09 12:00:07", "kind": "provider_error", "provider": "Agent", "model": "gpt-6-astra", "status": 401, "context": "daily_profile"}
+{"ts": "2026-11-09 13:20:13", "kind": "provider_error", "provider": "Agent", "model": "gpt-6-astra", "status": 401, "context": "daily_profile"}
+{"ts": "2026-11-09 13:22:47", "kind": "provider_error", "provider": "Agent", "model": "gpt-6-astra", "status": 401, "context": "daily_profile"}
+{"ts": "2026-11-09 14:00:20", "kind": "provider_error", "provider": "Agent", "model": "gpt-6-astra", "status": 401, "context": "daily_profile"}
+{"ts": "2026-11-09 17:00:23", "kind": "provider_error", "provider": "Agent", "model": "gpt-6-astra", "status": 401, "context": "daily_profile"}
+{"ts": "2026-11-09 17:00:39", "kind": "all_failed", "context": "daily_profile", "error": "image: cometapi (gpt-4o-image): HTTP 403: pre-consume quota failed, organization and owner combined remaining quota: ＄0.009662, need: ＄0.040000 (request id: 20261"}
+{"ts": "2026-11-09 20:00:14", "kind": "provider_error", "provider": "Agent", "model": "gpt-6-astra", "status": 401, "context": "daily_profile"}
+{"ts": "2026-11-09 22:37:37", "kind": "provider_error", "provider": "Agent", "model": "gpt-6-astra", "status": 401, "context": "daily_profile"}
+{"ts": "2026-11-09 22:40:22", "kind": "provider_error", "provider": "Agent", "model": "gpt-6-astra", "status": 401, "context": "daily_profile"}
+{"ts": "2026-11-09 23:40:19", "kind": "provider_error", "provider": "Agent", "model": "gpt-6-astra", "status": 401, "context": "daily_profile"}
+{"ts": "2026-11-10 02:20:25", "kind": "provider_error", "provider": "Agent", "model": "gpt-6-astra", "status": 401, "context": "daily_profile"}
+{"ts": "2026-11-10 02:22:16", "kind": "provider_error", "provider": "Agent", "model": "gpt-6-astra", "status": 401, "context": "daily_profile"}
+{"ts": "2026-11-10 02:24:05", "kind": "provider_error", "provider": "Agent", "model": "gpt-6-astra", "status": 401, "context": "daily_profile"}
+{"ts": "2026-11-10 02:24:19", "kind": "all_failed", "context": "daily_profile", "error": "image: cometapi (gpt-4o-image): ReadTimeout: HTTPSConnectionPool(host='api.cometapi.com', port=443): Read timed out. (read timeout=120)"}
+{"ts": "2026-11-10 02:25:49", "kind": "all_failed", "context": "daily_profile", "error": "image: cometapi (gpt-4o-image): HTTP 400: Your request was rejected by the safety system. If you believe this is an error, contact us at ***.***.com and include t\n\n(naam chhara abar chesta:)\ncometapi "}
+{"ts": "2026-11-10 03:01:22", "kind": "provider_error", "provider": "Agent", "model": "gpt-6-astra", "status": 401, "context": "daily_profile"}
+{"ts": "2026-11-10 09:00:12", "kind": "provider_error", "provider": "Agent", "model": "gpt-6-astra", "status": 401, "context": "daily_profile"}
+{"ts": "2026-11-10 17:42:08", "kind": "provider_error", "provider": "Agent", "model": "gpt-6-astra", "status": 401, "context": "daily_profile"}
+{"ts": "2026-11-10 17:43:59", "kind": "provider_error", "provider": "Agent", "model": "gpt-6-astra", "status": 401, "context": "daily_profile"}
+{"ts": "2026-11-10 17:45:04", "kind": "provider_error", "provider": "Agent", "model": "gpt-6-astra", "status": 401, "context": "daily_profile"}
+{"ts": "2026-11-10 17:47:37", "kind": "provider_error", "provider": "Agent", "model": "gpt-6-astra", "status": 401, "context": "daily_profile"}
+{"ts": "2026-11-10 18:00:18", "kind": "provider_error", "provider": "Agent", "model": "gpt-6-astra", "status": 401, "context": "daily_profile"}
+{"ts": "2026-11-10 21:20:03", "kind": "provider_error", "provider": "Agent", "model": "gpt-6-astra", "status": 401}
+{"ts": "2026-11-10 21:20:05", "kind": "provider_success", "provider": "X kiro", "model": "mistralai/mistral-large-2512", "task": false}
+{"ts": "2026-11-10 21:20:49", "kind": "provider_error", "provider": "Agent", "model": "gpt-6-astra", "status": 401}
+{"ts": "2026-11-10 21:20:51", "kind": "provider_success", "provider": "X kiro", "model": "mistralai/mistral-large-2512", "task": false}
+{"ts": "2026-11-10 21:21:02", "kind": "provider_error", "provider": "Agent", "model": "gpt-6-astra", "status": 401}
+{"ts": "2026-11-10 21:21:03", "kind": "provider_success", "provider": "X kiro", "model": "mistralai/mistral-large-2512", "task": false}
+{"ts": "2026-11-11 01:50:28", "kind": "provider_error", "provider": "Agent", "model": "gpt-6-astra", "status": 401, "context": "daily_profile"}
+{"ts": "2026-11-11 01:53:33", "kind": "provider_error", "provider": "Agent", "model": "gpt-6-astra", "status": 401, "context": "daily_profile"}
+{"ts": "2026-11-11 02:57:08", "kind": "provider_error", "provider": "Agent", "model": "gpt-6-astra", "status": 401, "context": "daily_profile"}
+{"ts": "2026-11-11 15:19:47", "kind": "provider_error", "provider": "Agent", "model": "gpt-6-astra", "status": 401, "context": "daily_profile"}
+{"ts": "2026-11-11 15:21:47", "kind": "provider_error", "provider": "Agent", "model": "gpt-6-astra", "status": 401}
+{"ts": "2026-11-11 15:21:48", "kind": "provider_success", "provider": "X kiro", "model": "mistralai/mistral-large-2512", "task": false}

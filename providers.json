@@ -1,0 +1,65 @@
+{
+  "active": "custom1794168501",
+  "providers": [
+    {
+      "id": "custom1793701377",
+      "name": "X kiro",
+      "key": "sk-xt-429e9c055649097750457c011bd87c50fe4e48b92434ca3a",
+      "url": "https://api.xkiro.com/v1/chat/completions",
+      "models": [
+        "mistralai/mistral-large-2512"
+      ],
+      "web_search_params": {
+        "web_search": {
+          "enable": true
+        }
+      },
+      "thinking_params": {
+        "reasoning_effort": "high"
+      },
+      "timeout": 30,
+      "web_search_mode": "auto",
+      "thinking_mode": "auto",
+      "vision": true,
+      "vision_models": []
+    },
+    {
+      "id": "custom1793736416",
+      "name": "Vyce",
+      "key": "sk-3010641494fcb057593b664e67142bcb381bc56731318f48",
+      "url": "https://vyceai.com/v1/chat/completions",
+      "models": [
+        "deepseek-v4.1"
+      ],
+      "timeout": 25,
+      "web_search_params": {
+        "web_search": {
+          "enable": true
+        }
+      },
+      "thinking_params": {
+        "reasoning_effort": "high"
+      },
+      "web_search_mode": "auto",
+      "thinking_mode": "auto",
+      "vision": true,
+      "vision_models": []
+    },
+    {
+      "id": "custom1794168501",
+      "name": "Agent",
+      "key": "sk-N7tfoudpJoJ1hKOtWcnnHmvOIPfydoW5VGNawNnwUMs",
+      "url": "https://api.xpiki.com/v1/chat/completions",
+      "models": [
+        "claude-fable-5-1"
+      ],
+      "timeout": 25,
+      "web_search_mode": "off",
+      "web_search_params": {},
+      "thinking_mode": "off",
+      "thinking_params": {},
+      "vision": true,
+      "vision_models": []
+    }
+  ]
+}

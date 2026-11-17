@@ -3804,6 +3804,9 @@ async def setup_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "url": resolve_url(d.get("url") or PRESETS[preset]["url"], d.get("account_id")),
             "models": models,
             "timeout": 25,
+            "web_search_mode": "off", "web_search_params": {},
+            "thinking_mode": "off", "thinking_params": {},
+            "vision": True, "vision_models": [],
         }
         context.user_data.pop("setup", None)
 

@@ -1,0 +1,62 @@
+{
+  "image_providers": [
+    {
+      "id": "imgcustom1793822222",
+      "name": "cometapi",
+      "type": "openai",
+      "url": "https://api.cometapi.com/v1/images/generations",
+      "key": "sk-A0mFyrzATCJFq9MoVn1JdOssCqUXplOJXMfphX1CH7e0Sn3o",
+      "model": "gpt-4o-image",
+      "size": "1024x1024"
+    },
+    {
+      "id": "imgcustom1794682691",
+      "name": "Test",
+      "type": "openai",
+      "url": "https://api.xpiki.com/v1/images",
+      "key": "sk-N7tfoudpJoJ1hKOtWcnnHmvOIPfydoW5VGNawNnwUMs",
+      "model": "gpt-image-2",
+      "size": "1024x1024"
+    }
+  ],
+  "image_active": "imgcustom1794682691",
+  "daily_profile_enabled": true,
+  "business_connection_id": "3Gw857NzQFdBBAAAAjQmV1uyuY8",
+  "daily_profile_hour": 18,
+  "daily_profile_minute": 0,
+  "daily_profile_topic": "Famous anime character",
+  "daily_profile_history": [
+    "The web search results only provide information about Elfaria Albis Serfort, which is explicitly excluded in your request. Since no other character is mentioned in the results, I cannot pick a different one while adhering to your constraints.",
+    "Lara (Goodbye, Lara)",
+    "Legolas (The Lord of the Rings)",
+    "Marcille Donato (Delicious in Dungeon)",
+    "Colette Loire (Wistoria: Wand and Sword)",
+    "Sion Ulster (Wistoria: Wand and Sword)",
+    "Artoria Pendragon (Fate/stay night)",
+    "Naruto Uzumaki (Naruto Shippuden)",
+    "Rosti Nauman (Wistoria: Wand and Sword)",
+    "Monkey D. Luffy (One Piece)",
+    "Could not search the web this time.",
+    "Will Serfort (Wistoria: Wand and Sword)",
+    "Satoru Gojo (Jujutsu Kaisen)",
+    "Sukuna (Jujutsu Kaisen)",
+    "Eren Yeager (Attack on Titan)",
+    "Lelouch Lamperouge (Code Geass: Lelouch of the Rebellion)",
+    "Darth Vader (Star Wars)",
+    "Elfaria Albis Serfort (Wistoria: Wand and Sword)",
+    "Elfaria Albis Serfort (Tsue to Tsurugi no Wistoria)",
+    "Qifrey (Witch Hat Atelier)",
+    "Kurisu Makise (Steins;Gate)",
+    "Sung Jinwoo (Solo Leveling)",
+    "Roronoa Zoro (One Piece)",
+    "Emilia (Re:Zero)",
+    "L Lawliet (Death Note)"
+  ],
+  "daily_profile_last_run": "2026-11-10",
+  "daily_profile_last_result": {
+    "when": "11 Nov, 03:20 PM",
+    "ok": true,
+    "summary": "L Lawliet (Death Note)"
+  },
+  "daily_profile_mode": "auto"
+}

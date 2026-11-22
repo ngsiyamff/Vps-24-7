@@ -43,7 +43,7 @@ from telegram.ext import (
 # CONFIG
 # ============================================================
 
-BOT_TOKEN = "8890241376:AAG4JCryoHuuaGBKg3b0BJd9Ntfb8vxq9RM"  # test only
+BOT_TOKEN = os.environ.get("BOT_TOKEN") or "8890241376:AAG4JCryoHuuaGBKg3b0BJd9Ntfb8vxq9RM"  # test only - revoke in @BotFather and use the BOT_TOKEN env var
 # MAIN ACCOUNT
 MY_USER_ID = 6112143500
 
@@ -81,6 +81,19 @@ PRESETS = {
         "url": "https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/v1/chat/completions",
         "model": "@cf/meta/llama-3.1-8b-instruct",
     },
+    "anthropic": {
+        "label": "Claude (Anthropic)",
+        "url": "https://api.anthropic.com/v1/messages",
+        "model": "claude-sonnet-5-5",
+        "type": "anthropic",
+    },
+    # any Anthropic-compatible gateway (asks for name + URL + key + model)
+    "anthropic_custom": {
+        "label": "Anthropic-compatible API",
+        "url": "",
+        "model": "",
+        "type": "anthropic",
+    },
 }
 
 # ---------- URL helpers: a base URL is enough ----------
@@ -94,12 +107,21 @@ def _split_url(url):
     return (m.group(1), m.group(2) or "") if m else ((url or ""), "")
 
 
-def normalize_chat_url(url):
-    """https://api.example.com/v1 -> https://api.example.com/v1/chat/completions"""
+def normalize_chat_url(url, api_type="openai"):
+    """https://api.example.com/v1 -> https://api.example.com/v1/chat/completions
+    (Anthropic type: .../v1/messages)"""
     u = (url or "").strip().rstrip("/")
     host, path = _split_url(u)
     if not host.startswith("http"):
         return u
+    if api_type == "anthropic":
+        if path.endswith("/messages"):
+            return u
+        if not path:
+            return f"{host}/v1/messages"
+        if re.search(r"/v\d+$", path):
+            return f"{u}/messages"
+        return f"{u}/v1/messages"
     if re.search(r"/(?:chat/)?completions$", path):
         return u
     if not path:                                    # just a host name
@@ -133,7 +155,7 @@ def normalize_image_url(url, kind="openai"):
 def api_base_from_url(url):
     """The part before /chat/completions, /images/generations ... (for /models)."""
     u = (url or "").strip().rstrip("/")
-    for suffix in ("/chat/completions", "/images/generations", "/images/edits", "/completions", "/chat"):
+    for suffix in ("/chat/completions", "/images/generations", "/images/edits", "/completions", "/messages", "/chat"):
         if u.endswith(suffix):
             return u[:-len(suffix)]
     return u
@@ -148,12 +170,16 @@ _IMAGE_RX = re.compile(
     r"seedream|kolors|nano-?banana|grok-imagine", re.I)
 
 
-def fetch_models(base_url, key, gemini_native=False):
+def fetch_models(base_url, key, gemini_native=False, api_type="openai"):
     """GET {base}/models -> (sorted list of model ids, error or None)."""
     try:
         url = f"{(base_url or '').rstrip('/')}/models"
         if gemini_native:
             r = http_session.get(url + "?pageSize=200", headers={"x-goog-api-key": key}, timeout=25)
+        elif api_type == "anthropic":
+            r = http_session.get(url + "?limit=1000", headers={"x-api-key": key, "anthropic-version": ANTHROPIC_VERSION}, timeout=25)
+            if r.status_code == 401:               # gateways that want Bearer
+                r = http_session.get(url + "?limit=1000", headers={"Authorization": f"Bearer {key}", "anthropic-version": ANTHROPIC_VERSION}, timeout=25)
         else:
             r = http_session.get(url, headers={"Authorization": f"Bearer {key}"}, timeout=25)
         if r.status_code != 200:
@@ -189,6 +215,10 @@ MODELS_PER_PAGE = 8
 
 
 def _selected_models(ml):
+    if ml.get("adding"):
+        return set(ml.get("picked") or [])
+    if ml["scope"] == "s":
+        return {load_settings().get("task_model")}
     if ml["scope"] == "p":
         p = find_provider(ml["pid"])
         return set((p or {}).get(ml["kind"]) or [])
@@ -203,6 +233,7 @@ def models_picker_text(ml):
     what = {
         "models": "chat model", "vision_models": "vision (chobi dekhar) model",
         "model": "chobi banano model", "edit_model": "chobi EDIT model",
+        "task_model": "Task model",
     }[ml["kind"]]
     multi = ml["kind"] in ("models", "vision_models")
     hint = ("Tap kore chalu/bondho koro (✅ = chalu). Ekta fail korle porerta try hobe."
@@ -225,7 +256,13 @@ def models_picker_keyboard(ml):
         nav.append(InlineKeyboardButton("Next ▶️", callback_data=f"{scope}_page:{page + 1}"))
     if nav:
         rows.append(nav)
-    rows.append(nav_row(f"{scope}_open:{ml['pid']}"))
+    if ml.get("adding"):
+        rows.append([InlineKeyboardButton(f"✅ Done - {len(ml.get('picked') or [])} model niye add koro", callback_data="p_adddone")])
+        rows.append(nav_row("p_menu"))
+    elif scope == "s":
+        rows.append(nav_row("s_tai"))
+    else:
+        rows.append(nav_row(f"{scope}_open:{ml['pid']}"))
     return InlineKeyboardMarkup(rows)
 
 
@@ -494,7 +531,9 @@ def enrich_plain_result(result):
                 reasoning = json.dumps(reasoning, ensure_ascii=False)[:2000]
             for tc in msg.get("tool_calls") or []:
                 fn = tc.get("function") or {}
-                tool_calls.append({"name": fn.get("name", ""), "arguments": fn.get("arguments", "")})
+                tool_calls.append({"id": tc.get("id", ""), "name": fn.get("name", ""), "arguments": fn.get("arguments", "")})
+            if msg.get("tool_calls"):
+                result["_raw_tool_calls"] = msg["tool_calls"]
         result["_extras"] = extras
         if reasoning:
             result["_reasoning"] = reasoning
@@ -547,7 +586,9 @@ def parse_sse_chat_response(raw_text):
 
             for tc in delta.get("tool_calls") or []:
                 idx = tc.get("index", 0)
-                slot = tool_calls.setdefault(idx, {"name": "", "arguments": ""})
+                slot = tool_calls.setdefault(idx, {"id": "", "name": "", "arguments": ""})
+                if tc.get("id"):
+                    slot["id"] = tc["id"]
                 fn = tc.get("function") or {}
                 if fn.get("name"):
                     slot["name"] = fn["name"]
@@ -572,6 +613,498 @@ def parse_chat_response(response):
         return enrich_plain_result(response.json())
     except (json.JSONDecodeError, ValueError):
         return parse_sse_chat_response(response.text)
+
+
+# ============================================================
+# MULTI-API ENGINE
+#  - OpenAI-compatible AND Anthropic-compatible (/v1/messages) providers
+#  - Web search + thinking on EVERY provider:
+#      web search : native params -> bot-side tool loop -> results injected in prompt
+#      thinking   : native params -> <think> prompt (works on any model)
+#    If a provider rejects a native param (HTTP 400/404/422) the bot drops to the
+#    next level by itself, so the feature keeps working instead of failing.
+# ============================================================
+
+ANTHROPIC_VERSION = "2023-06-01"
+CLIENT_WS = "_client"       # web_search_params marker: bot runs the search itself
+PROMPT_TH = "_prompt"       # thinking_params marker: <think> prompt, no native API
+SEARCH_MAX_ROUNDS = 3
+PARAM_REJECTED = {400, 404, 405, 415, 422}
+RETRY_STATUS = {408, 429, 500, 502, 503, 504}
+
+CUSTOM_PRESETS = ("custom", "anthropic_custom")
+
+
+def preset_type(preset):
+    return (PRESETS.get(preset) or {}).get("type", "openai")
+
+
+def provider_type(p):
+    """"openai" or "anthropic". Saved type wins; otherwise guessed from the URL."""
+    t = str(p.get("type") or "").lower()
+    if t in ("openai", "anthropic"):
+        return t
+    u = (p.get("url") or "").lower().rstrip("/")
+    if "anthropic.com" in u or u.endswith("/messages"):
+        return "anthropic"
+    return "openai"
+
+
+def default_params_for(p, kind):
+    """Sensible web_search / thinking params for this provider type."""
+    url = (p.get("url") or "").lower()
+    if provider_type(p) == "anthropic":
+        return {
+            "web_search": {"tools": [{"type": "web_search_20250305", "name": "web_search", "max_uses": 5}]},
+            "thinking": {"thinking": {"type": "enabled", "budget_tokens": 4000}},
+        }[kind]
+    no_native = ("api.openai.com", "generativelanguage.googleapis.com", "cloudflare.com")
+    if kind == "web_search":
+        if any(h in url for h in no_native):
+            return {CLIENT_WS: True}
+        return dict(DEFAULT_EXTRA_PARAMS["web_search"])
+    if "generativelanguage.googleapis.com" in url:
+        return {"reasoning_effort": "high"}
+    if any(h in url for h in no_native):
+        return {PROMPT_TH: True}
+    return dict(DEFAULT_EXTRA_PARAMS["thinking"])
+
+
+def _clean_params(params):
+    return {k: v for k, v in (params or {}).items() if not str(k).startswith("_")}
+
+
+def _merge_params(payload, params):
+    for k, v in _clean_params(params).items():
+        if k == "tools" and isinstance(v, list):
+            payload.setdefault("tools", []).extend(v)
+        else:
+            payload[k] = v
+
+
+# ---------- messages -> Anthropic format ----------
+def _as_blocks(c):
+    return [{"type": "text", "text": c}] if isinstance(c, str) else list(c)
+
+
+def _image_block(url):
+    m = re.match(r"data:([^;]+);base64,(.+)$", url or "", re.S)
+    if m:
+        return {"type": "image", "source": {"type": "base64", "media_type": m.group(1), "data": m.group(2)}}
+    return {"type": "image", "source": {"type": "url", "url": url}}
+
+
+def to_anthropic_messages(messages):
+    out = []
+    for m in messages:
+        role = m.get("role")
+        if role not in ("user", "assistant"):
+            continue
+        c = m.get("content")
+        if isinstance(c, list):
+            blocks = []
+            for it in c:
+                if not isinstance(it, dict):
+                    continue
+                if it.get("type") == "text":
+                    if it.get("text"):
+                        blocks.append({"type": "text", "text": it["text"]})
+                elif it.get("type") == "image_url":
+                    blocks.append(_image_block((it.get("image_url") or {}).get("url", "")))
+                else:
+                    blocks.append(it)
+            c = blocks
+        if not c or (isinstance(c, str) and not c.strip()):
+            continue
+        if out and out[-1]["role"] == role:           # Anthropic wants clean alternation
+            prev = out[-1]["content"]
+            if isinstance(prev, str) and isinstance(c, str):
+                out[-1]["content"] = prev + "\n\n" + c
+            else:
+                out[-1]["content"] = _as_blocks(prev) + _as_blocks(c)
+        else:
+            out.append({"role": role, "content": c})
+    while out and out[0]["role"] != "user":           # first message must be "user"
+        out.pop(0)
+    return out
+
+
+def build_request(provider, model, system_text, messages, ws_params=None, th_params=None,
+                  tools=None, task=False, max_tokens=None):
+    """-> (headers, payload) for either API type."""
+    if provider_type(provider) == "anthropic":
+        headers = {
+            "x-api-key": provider["key"],
+            "anthropic-version": ANTHROPIC_VERSION,
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "model": model,
+            "messages": to_anthropic_messages(messages),
+            "max_tokens": max_tokens or (8192 if task else 2048),
+            "stream": False,
+        }
+        if system_text and system_text.strip():
+            payload["system"] = system_text
+        for params in (ws_params, th_params):
+            if params:
+                _merge_params(payload, params)
+        if tools:
+            payload.setdefault("tools", []).extend(tools)
+        budget = (payload.get("thinking") or {}).get("budget_tokens")
+        if isinstance(budget, int):                    # max_tokens must be bigger than the budget
+            payload["max_tokens"] = max(payload["max_tokens"], budget + 2048)
+        return headers, payload
+
+    headers = {
+        "Authorization": f"Bearer {provider['key']}",
+        "Content-Type": "application/json",
+        "X-Title": "Telegram AI Assistant",
+    }
+    msgs = list(messages)
+    if system_text and system_text.strip():
+        msgs = [{"role": "system", "content": system_text}] + msgs
+    payload = {"model": model, "messages": msgs, "stream": False}
+    if max_tokens:
+        payload["max_tokens"] = max_tokens
+    if is_google(provider["url"]):
+        payload["reasoning_effort"] = "low"            # much faster replies
+    for params in (ws_params, th_params):
+        if params:
+            _merge_params(payload, params)
+    if tools:
+        payload.setdefault("tools", []).extend(tools)
+    return headers, payload
+
+
+def send_chat(provider, headers, payload, timeout):
+    """POST + one retry on busy/transient errors. Anthropic-style gateways that
+    want 'Authorization: Bearer' instead of 'x-api-key' are detected on a 401."""
+    url = provider["url"]
+    r = post_json(url, headers, payload, timeout)
+    if r.status_code in RETRY_STATUS:
+        time.sleep(0.6)
+        r = post_json(url, headers, payload, timeout)
+    if r.status_code == 401 and "x-api-key" in headers:
+        h2 = {k: v for k, v in headers.items() if k != "x-api-key"}
+        h2["Authorization"] = f"Bearer {provider['key']}"
+        r2 = post_json(url, h2, payload, timeout)
+        if r2.status_code != 401:
+            headers.clear()
+            headers.update(h2)
+            return r2
+    return r
+
+
+# ---------- Anthropic response -> chat-completions shape ----------
+def _normalize_anthropic(blocks, stop=None):
+    text, reasoning, calls, sources = [], [], [], []
+    for b in blocks or []:
+        if not isinstance(b, dict):
+            continue
+        t = b.get("type")
+        if t == "text":
+            text.append(b.get("text", ""))
+            for c in b.get("citations") or []:
+                if isinstance(c, dict) and c.get("url"):
+                    sources.append({"title": c.get("title"), "url": c.get("url")})
+        elif t == "thinking":
+            reasoning.append(b.get("thinking", ""))
+        elif t in ("tool_use", "server_tool_use"):
+            calls.append({
+                "id": b.get("id", ""), "name": b.get("name", ""),
+                "arguments": json.dumps(b.get("input") or {}, ensure_ascii=False),
+                "server": t == "server_tool_use",
+            })
+        elif t == "web_search_tool_result":
+            cont = b.get("content")
+            if isinstance(cont, list):
+                for r in cont:
+                    if isinstance(r, dict) and r.get("url"):
+                        sources.append({"title": r.get("title"), "url": r.get("url")})
+    uniq, seen = [], set()
+    for s in sources:
+        if s["url"] not in seen:
+            seen.add(s["url"])
+            uniq.append(s)
+    return {
+        "choices": [{"message": {"content": "".join(text)}}],
+        "_reasoning": "\n".join(x for x in reasoning if x),
+        "_tool_calls": calls,
+        "_extras": {"sources": uniq[:30]} if uniq else {},
+        "_raw_content": blocks or [],
+        "_stop": stop,
+    }
+
+
+def parse_anthropic_sse(raw_text):
+    """For gateways that stream even when stream=false."""
+    blocks = {}
+    stop = None
+    for line in raw_text.splitlines():
+        line = line.strip()
+        if not line.startswith("data:"):
+            continue
+        try:
+            ev = json.loads(line[5:].strip())
+        except json.JSONDecodeError:
+            continue
+        et, idx = ev.get("type"), ev.get("index", 0)
+        if et == "content_block_start":
+            blocks[idx] = dict(ev.get("content_block") or {})
+            blocks[idx].setdefault("_json", "")
+        elif et == "content_block_delta" and idx in blocks:
+            d, b = ev.get("delta") or {}, blocks[idx]
+            if d.get("type") == "text_delta":
+                b["text"] = b.get("text", "") + d.get("text", "")
+            elif d.get("type") == "thinking_delta":
+                b["thinking"] = b.get("thinking", "") + d.get("thinking", "")
+            elif d.get("type") == "input_json_delta":
+                b["_json"] += d.get("partial_json", "")
+        elif et == "message_delta":
+            stop = (ev.get("delta") or {}).get("stop_reason") or stop
+    out = []
+    for i in sorted(blocks):
+        b = blocks[i]
+        j = b.pop("_json", "")
+        if b.get("type") in ("tool_use", "server_tool_use"):
+            try:
+                b["input"] = json.loads(j) if j else {}
+            except json.JSONDecodeError:
+                b["input"] = {}
+        out.append(b)
+    return _normalize_anthropic(out, stop)
+
+
+def parse_anthropic_response(response):
+    ctype = (response.headers.get("content-type") or "").lower()
+    if "text/event-stream" in ctype or response.text.lstrip().startswith(("event:", "data:")):
+        return parse_anthropic_sse(response.text)
+    data = response.json()
+    return _normalize_anthropic(data.get("content"), data.get("stop_reason"))
+
+
+def parse_provider_response(provider, response):
+    if provider_type(provider) == "anthropic":
+        return parse_anthropic_response(response)
+    return parse_chat_response(response)
+
+
+# ---------- bot-side web search (works with ANY provider) ----------
+WS_TOOL_DESC = ("Search the web for current information (news, prices, scores, who holds a "
+                "position now, latest versions, anything you are unsure about). "
+                "Returns titles, links and snippets.")
+_WS_SCHEMA = {"type": "object",
+              "properties": {"query": {"type": "string", "description": "short search query"}},
+              "required": ["query"]}
+
+SEARCH_UA = "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Mobile Safari/537.36"
+
+
+def _strip_tags(s):
+    return html_lib.unescape(re.sub(r"<[^>]+>", "", s or "")).strip()
+
+
+def _tavily_key():
+    return os.environ.get("TAVILY_API_KEY") or load_settings().get("tavily_key") or ""
+
+
+def _search_tavily(query, key, n=5):
+    r = http_session.post(
+        "https://api.tavily.com/search",
+        json={"api_key": key, "query": query, "max_results": n, "include_answer": True},
+        timeout=25,
+    )
+    r.raise_for_status()
+    data = r.json()
+    res = [{"title": x.get("title", ""), "url": x.get("url", ""), "snippet": x.get("content", "")}
+           for x in data.get("results", [])[:n]]
+    if data.get("answer"):
+        res.insert(0, {"title": "Summary", "url": "", "snippet": data["answer"]})
+    return res
+
+
+def _search_ddg(query, n=5):
+    from urllib.parse import urlparse, parse_qs, unquote
+    r = http_session.post("https://html.duckduckgo.com/html/", data={"q": query},
+                          headers={"User-Agent": SEARCH_UA}, timeout=20)
+    r.raise_for_status()
+    res = []
+    for block in r.text.split('class="result__a"')[1:]:
+        href = re.search(r'href="([^"]+)"', block)
+        title = re.search(r">(.*?)</a>", block, re.S)
+        snip = re.search(r'class="result__snippet"[^>]*>(.*?)</a>', block, re.S)
+        if not href:
+            continue
+        url = html_lib.unescape(href.group(1))
+        if "uddg=" in url:
+            url = unquote(parse_qs(urlparse(url if url.startswith("http") else "https:" + url).query).get("uddg", [url])[0])
+        res.append({"title": _strip_tags(title.group(1)) if title else "", "url": url,
+                    "snippet": _strip_tags(snip.group(1)) if snip else ""})
+        if len(res) >= n:
+            break
+    return res
+
+
+def web_search_text(query, n=5):
+    """-> (text for the AI, [{title,url}]). Never raises."""
+    query = (query or "").strip()[:300]
+    if not query:
+        return "Empty search query.", []
+    res, err = [], ""
+    for name, fn in (("tavily", lambda: _search_tavily(query, _tavily_key(), n) if _tavily_key() else []),
+                     ("ddg", lambda: _search_ddg(query, n))):
+        try:
+            res = fn()
+        except Exception as e:
+            err = f"{name}: {type(e).__name__}"
+            continue
+        if res:
+            break
+    log_event("web_search", provider="bot-search", query=query, results=len(res), error=err)
+    if not res:
+        return f"No web results found for '{query}' ({err or 'empty'}). Answer from your own knowledge and say it is unverified.", []
+    lines = [f"Web results for: {query}"]
+    for i, x in enumerate(res, 1):
+        lines.append(f"{i}. {x['title']}\n   {x['url']}\n   {x['snippet'][:400]}")
+    return "\n".join(lines)[:6000], [{"title": x["title"], "url": x["url"]} for x in res if x["url"]]
+
+
+def _now_bd_text():
+    return dtm.datetime.now(BD_TZ).strftime("%A, %d %B %Y, %I:%M %p (Bangladesh time)")
+
+
+THINK_PROMPT = (
+    "THINKING MODE: First reason through the request carefully, step by step, inside "
+    "<think>...</think> (private, never shown to the user). Then write the final reply AFTER "
+    "</think>. The final reply must contain no reasoning text - only the message for the user, "
+    "following all the style and language rules above."
+)
+WS_TOOL_PROMPT = (
+    "You have a web_search tool. For anything current or uncertain (news, prices, scores, who "
+    "holds a position now, latest versions, dates) call it BEFORE answering instead of guessing. "
+    "Today is {now}. Do not mention the tool in the final reply."
+)
+WS_INJECT_PROMPT = (
+    "LIVE WEB SEARCH RESULTS (fetched just now, today is {now}). Use them for facts that may have "
+    "changed; if they do not contain the answer say you are not sure. Do not mention this block.\n{results}"
+)
+
+
+def _last_user_text(messages):
+    for m in reversed(messages):
+        if m.get("role") == "user":
+            c = m.get("content")
+            if isinstance(c, list):
+                c = " ".join(i.get("text", "") for i in c if isinstance(i, dict) and i.get("type") == "text")
+            if c:
+                return str(c)
+    return ""
+
+
+def _append_tool_round(ptype, payload, result, outputs):
+    """Adds the assistant tool call + our tool results to payload['messages']."""
+    if ptype == "anthropic":
+        payload["messages"].append({"role": "assistant", "content": result.get("_raw_content") or []})
+        payload["messages"].append({"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": tc["id"], "content": out} for tc, out in outputs
+        ]})
+        return
+    raw = result.get("_raw_tool_calls")
+    if not raw:
+        raw = [{"id": tc["id"], "type": "function",
+                "function": {"name": tc["name"], "arguments": tc["arguments"] or "{}"}}
+               for tc, _ in outputs]
+    payload["messages"].append({"role": "assistant", "content": (result["choices"][0]["message"].get("content") or None),
+                                "tool_calls": raw})
+    for tc, out in outputs:
+        payload["messages"].append({"role": "tool", "tool_call_id": tc["id"], "name": tc["name"], "content": out})
+
+
+def _chat_attempt(provider, model, system_text, messages, ws_mode, th_mode, task, timeout):
+    """One full request (with the bot-side search loop if ws_mode == 'tool').
+    -> (result|None, status, error)"""
+    ptype = provider_type(provider)
+    ws_p = provider.get("web_search_params") or {}
+    th_p = provider.get("thinking_params") or {}
+    sys_text = system_text or ""
+    if th_mode == "prompt":
+        sys_text += "\n\n" + THINK_PROMPT
+    tools = None
+    if ws_mode == "tool":
+        sys_text += "\n\n" + WS_TOOL_PROMPT.format(now=_now_bd_text())
+        tools = [{"name": "web_search", "description": WS_TOOL_DESC, "input_schema": _WS_SCHEMA}] \
+            if ptype == "anthropic" else \
+            [{"type": "function", "function": {"name": "web_search", "description": WS_TOOL_DESC, "parameters": _WS_SCHEMA}}]
+    elif ws_mode == "inject":
+        info, _src = web_search_text(_last_user_text(messages)[:200])
+        sys_text += "\n\n" + WS_INJECT_PROMPT.format(now=_now_bd_text(), results=info)
+
+    headers, payload = build_request(
+        provider, model, sys_text, messages,
+        ws_params=ws_p if ws_mode == "native" else None,
+        th_params=th_p if th_mode == "native" else None,
+        tools=tools, task=task,
+    )
+    acc_calls, acc_sources = [], []
+    for rnd in range(SEARCH_MAX_ROUNDS + 1):
+        if tools and rnd == SEARCH_MAX_ROUNDS:        # out of rounds: force a text answer
+            payload["tool_choice"] = {"type": "none"} if ptype == "anthropic" else "none"
+        r = send_chat(provider, headers, payload, timeout)
+        if r.status_code != 200:
+            return None, r.status_code, _api_error(r)
+        result = parse_provider_response(provider, r)
+        mine = [tc for tc in result.get("_tool_calls", []) if tc.get("name") == "web_search" and not tc.get("server")]
+        if tools and mine and rnd < SEARCH_MAX_ROUNDS:
+            outputs = []
+            for i, tc in enumerate(mine):
+                tc["id"] = tc.get("id") or f"call_{rnd}_{i}"
+                try:
+                    q = (json.loads(tc.get("arguments") or "{}") or {}).get("query", "")
+                except json.JSONDecodeError:
+                    q = ""
+                out, src = web_search_text(q)
+                outputs.append((tc, out))
+                acc_sources += src
+            acc_calls += mine
+            _append_tool_round(ptype, payload, result, outputs)
+            continue
+        if acc_calls:
+            result["_tool_calls"] = acc_calls + [c for c in result.get("_tool_calls", []) if c not in mine]
+        if acc_sources:
+            result.setdefault("_extras", {})["sources"] = acc_sources[:30]
+        return result, 200, None
+    return None, 0, "search loop ended"
+
+
+def run_chat(provider, model, system_text, messages, ws=False, th=False, task=False, timeout=60):
+    """Single entry point for every chat call.
+    -> (result|None, http_status, error). result is chat-completions shaped and has
+    result['_modes'] = {'ws': ..., 'th': ...} telling which method actually worked."""
+    ws_p = provider.get("web_search_params") or {}
+    th_p = provider.get("thinking_params") or {}
+    ws_chain = (["tool", "inject"] if ws_p.get(CLIENT_WS) else ["native", "tool", "inject"]) if ws else [None]
+    th_chain = (["prompt"] if th_p.get(PROMPT_TH) else ["native", "prompt"]) if th else [None]
+    levels = max(len(ws_chain), len(th_chain))
+    result, status, err = None, 0, "no attempt"
+    for lvl in range(levels):
+        ws_mode = ws_chain[min(lvl, len(ws_chain) - 1)]
+        th_mode = th_chain[min(lvl, len(th_chain) - 1)]
+        result, status, err = _chat_attempt(provider, model, system_text, messages, ws_mode, th_mode, task, timeout)
+        if result is not None:
+            result["_modes"] = {"ws": ws_mode, "th": th_mode}
+            return result, 200, None
+        if status not in PARAM_REJECTED or lvl + 1 >= levels:
+            break
+        log_event("native_fallback", provider=provider.get("name"), model=model, status=status,
+                  ws=ws_mode, th=th_mode, note="provider rejected the request, trying the next method")
+    return None, status, err
+
+
+def fetch_models_for(p):
+    """Model list for a provider dict (url/key/type)."""
+    return fetch_models(api_base_from_url(p["url"]), p["key"], api_type=provider_type(p))
+
 
 
 # ============================================================
@@ -724,7 +1257,8 @@ def log_thinking_search(provider_name, model_name, question, result, think_text,
 
     lines = [
         f"[{dtm.datetime.now(BD_TZ).strftime('%Y-%m-%d %H:%M:%S')}] {provider_name} / {model_name}",
-        f"Thinking: {'ON' if th_on else 'OFF'} | Web Search: {'ON' if ws_on else 'OFF'}",
+        f"Thinking: {'ON' if th_on else 'OFF'} | Web Search: {'ON' if ws_on else 'OFF'}"
+        + (f" | method: search={result['_modes'].get('ws')}, think={result['_modes'].get('th')}" if result.get("_modes") else ""),
         f"QUESTION: {str(question)[:500]}",
     ]
     if reasoning:
@@ -932,6 +1466,30 @@ def looks_like_code(text):
 
 def get_task_mode():
     return bool(load_settings().get("task_mode", True))
+
+
+def get_task_provider():
+    """Provider chosen for task mode in /settings -> Task AI (None = same as chat)."""
+    pid = load_settings().get("task_provider")
+    p = find_provider(pid) if pid else None
+    return p if (p and p.get("key") and p.get("models")) else None
+
+
+def get_task_model():
+    return (load_settings().get("task_model") or "").strip()
+
+
+def task_ai_label():
+    p = get_task_provider()
+    return f"{p['name']} / {get_task_model() or 'auto'}" if p else "same as chat AI"
+
+
+def task_display_model():
+    p = get_task_provider()
+    if p:
+        return get_task_model() or p["models"][0]
+    ops = ordered_providers()
+    return ops[0]["models"][0] if ops and ops[0].get("models") else "AI"
 
 
 def will_run_task_mode(user_text):
@@ -1558,24 +2116,15 @@ def pick_character():
         for model_name in provider.get("models", []):
             tag = f"{provider['name']} / {model_name}"
             try:
-                headers = {"Authorization": f"Bearer {provider['key']}", "Content-Type": "application/json"}
-                payload = {
-                    "model": model_name,
-                    "messages": [{"role": "user", "content": instruction}],
-                    "stream": False,
-                }
-                if is_google(provider["url"]):
-                    payload["reasoning_effort"] = "low"
-                if use_ws:
-                    payload.update(provider["web_search_params"])
-                if use_th:
-                    payload.update(provider["thinking_params"])
-                r = post_json(provider["url"], headers, payload, max(60, effective_timeout(provider, False, use_ws, use_th)))
-                if r.status_code != 200:
-                    errors.append(f"{tag}: HTTP {r.status_code}")
-                    log_event("provider_error", provider=provider["name"], model=model_name, status=r.status_code, context="daily_profile")
+                result, status, err = run_chat(
+                    provider, model_name, "", [{"role": "user", "content": instruction}],
+                    ws=use_ws, th=use_th, task=False,
+                    timeout=max(60, effective_timeout(provider, False, use_ws, use_th)),
+                )
+                if result is None:
+                    errors.append(f"{tag}: {err or 'HTTP ' + str(status)}")
+                    log_event("provider_error", provider=provider["name"], model=model_name, status=status, context="daily_profile")
                     continue
-                result = parse_chat_response(r)
                 log_tool_activity(provider["name"], model_name, result)
                 raw_text = (result["choices"][0]["message"]["content"] or "").strip()
                 text, think_text = split_think_tags(raw_text)
@@ -2217,7 +2766,17 @@ def ask_xkiro(user_id, user_text, image=None):
         print(">>> STYLE GUIDE: this person's chat with you is used")
 
     # Try the active provider first, then the others as fallback.
-    for provider in ordered_providers():
+    # Task mode can have its own AI (provider + model) set in /settings -> Task AI.
+    providers = ordered_providers()
+    task_pid, task_pref = None, None
+    if task:
+        tp = get_task_provider()
+        if tp:
+            task_pid, task_pref = tp["id"], get_task_model()
+            providers = [tp] + [p for p in providers if p["id"] != tp["id"]]
+            print(f">>> TASK AI: {tp['name']} / {task_pref or 'auto'}")
+
+    for provider in providers:
         if not (provider["key"] and provider["url"] and provider["models"]):
             continue
         if image and not provider.get("vision", True):
@@ -2225,33 +2784,19 @@ def ask_xkiro(user_id, user_text, image=None):
         if image:
             tried_vision = True
 
-        provider_name = provider["name"]
+        models_to_try = list((provider.get("vision_models") or provider["models"]) if image else provider["models"])
+        if task and provider["id"] == task_pid and task_pref:
+            models_to_try = [task_pref] + [m for m in models_to_try if m != task_pref]
 
-        headers = {
-            "Authorization": f"Bearer {provider['key']}",
-            "Content-Type": "application/json",
-            "X-Title": "Telegram AI Assistant",
-        }
+        system_text = (
+            get_system_prompt() + "\n\n" + language_instruction
+            + (("\n\n" + extra_instruction) if extra_instruction else "")
+            + (("\n\n" + style_guide) if style_guide else "")
+        )
 
-        models_to_try = (provider.get("vision_models") or provider["models"]) if image else provider["models"]
         for model_name in models_to_try:
-            payload = {
-                "model": model_name,
-                "messages": [
-                    {"role": "system", "content": get_system_prompt() + "\n\n" + language_instruction + (("\n\n" + extra_instruction) if extra_instruction else "") + (("\n\n" + style_guide) if style_guide else "")},
-                ] + context_history,
-                "stream": False,
-            }
-
-            if is_google(provider["url"]):
-                payload["reasoning_effort"] = "low"   # much faster replies
-
             ws_now = False if image else use_web_search(provider, user_text)
             th_now = False if image else use_thinking(provider, user_text, task)
-            if ws_now:
-                payload.update(provider["web_search_params"])
-            if th_now:
-                payload.update(provider["thinking_params"])
             if ws_now or th_now:
                 print(">>> " + " + ".join(x for x, on in (("WEB SEARCH", ws_now), ("THINKING", th_now)) if on))
 
@@ -2259,23 +2804,19 @@ def ask_xkiro(user_id, user_text, image=None):
                 # Task/code requests can take much longer to finish (long output,
                 # no token cap) - don't cut them off with the short chat timeout.
                 call_timeout = effective_timeout(provider, task, ws_now, th_now)
-                response = post_json(provider["url"], headers, payload, call_timeout)
-
-                if response.status_code in {408, 429, 500, 502, 503, 504}:
-                    # Often a transient "server busy" - retry this same model once.
-                    time.sleep(0.6)
-                    response = post_json(provider["url"], headers, payload, call_timeout)
-
-                if response.status_code != 200:
-                    last_error = f"{provider['name']} / {model_name}: HTTP {response.status_code}"
-                    print(f"\n{provider['name']} {model_name} ERROR: {response.status_code}")
-                    log_event("provider_error", provider=provider["name"], model=model_name, status=response.status_code)
+                result, status, err = run_chat(
+                    provider, model_name, system_text, context_history,
+                    ws=ws_now, th=th_now, task=task, timeout=call_timeout,
+                )
+                if result is None:
+                    last_error = f"{provider['name']} / {model_name}: {err or 'HTTP ' + str(status)}"
+                    print(f"\n{provider['name']} {model_name} ERROR: {status}")
+                    log_event("provider_error", provider=provider["name"], model=model_name, status=status)
                     # Do not print response bodies: they can contain provider metadata.
-                    if response.status_code in {408, 429, 500, 502, 503, 504}:
+                    if status in RETRY_STATUS:
                         break
                     continue
 
-                result = parse_chat_response(response)
                 log_tool_activity(provider["name"], model_name, result)
                 choices = result.get("choices", [])
                 if not choices:
@@ -2622,6 +3163,10 @@ def providers_keyboard():
         InlineKeyboardButton("➕ Cloudflare", callback_data="p_add:cloudflare"),
         InlineKeyboardButton("➕ Custom API", callback_data="p_add:custom"),
     ])
+    rows.append([
+        InlineKeyboardButton("➕ Claude (Anthropic)", callback_data="p_add:anthropic"),
+        InlineKeyboardButton("➕ Anthropic-compatible", callback_data="p_add:anthropic_custom"),
+    ])
     rows.append([InlineKeyboardButton(f"🖼 Image API ({len(img_list())})", callback_data="i_menu")])
     rows.append(nav_row("p_back"))
     return InlineKeyboardMarkup(rows)
@@ -2641,20 +3186,24 @@ def detail_text(p):
     names = {"off": "OFF", "auto": "AUTO ✅ (shudhu jokhon lage)", "on": "ON ✅ (protibar)"}
     return (
         f"⚙️ {p['name']}  ({active})\n\n"
+        f"API type: {'Anthropic (/v1/messages)' if provider_type(p) == 'anthropic' else 'OpenAI-compatible (/chat/completions)'}\n"
         f"URL: {p['url']}\n"
         f"Model: {', '.join(p['models'])}\n"
         f"Key: {mask(p['key'])}\n"
         f"Timeout: {p.get('timeout', 25)}s  (slow hole fast e porer provider e jabe)"
         f"{'  [Thinking/Search challe minimum ' + str(THINKING_TIMEOUT_FLOOR) + 's]' if (ws_mode != 'off' or th_mode != 'off') else ''}\n\n"
         f"🔎 Web Search: {names[ws_mode]}"
-        f"{' (params nai!)' if ws_mode != 'off' and not p.get('web_search_params') else ''}\n"
+        f"{' (params nai!)' if ws_mode != 'off' and not p.get('web_search_params') else ''}"
+        f"{' [bot nijei search kore]' if (p.get('web_search_params') or {}).get(CLIENT_WS) else ''}\n"
         f"🧠 Thinking: {names[th_mode]}"
-        f"{' (params nai!)' if th_mode != 'off' and not p.get('thinking_params') else ''}\n"
+        f"{' (params nai!)' if th_mode != 'off' and not p.get('thinking_params') else ''}"
+        f"{' [<think> prompt]' if (p.get('thinking_params') or {}).get(PROMPT_TH) else ''}\n"
         f"👁 Vision (chobi dekha): {'ON ✅' if p.get('vision', True) else 'OFF'}"
         f"{' | model: ' + ', '.join(p['vision_models']) if p.get('vision_models') else ''}\n\n"
         "AUTO = bot nijei bujhe kokhon lagbe (jemon khobor/dam/aj-ker prosno -> search; "
         "kothin prosno/code/hishab -> thinking). ON = protibar. Button chapte chapte "
-        "OFF → AUTO → ON → OFF."
+        "OFF → AUTO → ON → OFF.\n"
+        "Provider er nijer search/thinking na thakleo bot nijei fallback kore (🧪 Test Search/Think chepe dekho)."
     )
 
 
@@ -2669,6 +3218,7 @@ def detail_keyboard(p):
         [InlineKeyboardButton("📥 Fetch models (provider ki ki model dey)", callback_data=f"p_fetch:{pid}:models")],
         [InlineKeyboardButton("🌐 URL", callback_data=f"p_edit:{pid}:url"),
          InlineKeyboardButton("📛 Name", callback_data=f"p_edit:{pid}:name")],
+        [InlineKeyboardButton(f"🔌 API type: {provider_type(p).upper()} (chapo = bodlao)", callback_data=f"p_type:{pid}")],
         [InlineKeyboardButton("⏱ Timeout", callback_data=f"p_edit:{pid}:timeout")],
         [InlineKeyboardButton(
             f"🔎 Web Search: {provider_mode(p, 'web_search').upper()}",
@@ -2684,7 +3234,8 @@ def detail_keyboard(p):
         ), InlineKeyboardButton("✏️", callback_data=f"p_edit:{pid}:vision_models"),
            InlineKeyboardButton("📥", callback_data=f"p_fetch:{pid}:vision_models")],
         [InlineKeyboardButton("🧪 Test", callback_data=f"p_test:{pid}"),
-         InlineKeyboardButton("🗑 Delete", callback_data=f"p_del:{pid}")],
+         InlineKeyboardButton("🧪 Test Search/Think", callback_data=f"p_testfeat:{pid}")],
+        [InlineKeyboardButton("🗑 Delete", callback_data=f"p_del:{pid}")],
         [InlineKeyboardButton("📋 Logs", callback_data=f"p_logs:{pid}")],
         nav_row("p_menu"),
     ]
@@ -2699,14 +3250,19 @@ FIELD_PROMPTS = {
     "vision_models": "Chobi dekhar jonno model (jemon gpt-4o). Ekadhik hole comma diye. Normal model e-i chalate chaile - likho.",
     "timeout": "Timeout koto second hobe? (number, 5 theke 60). Kom mane fast fallback, beshi mane slow provider o chance pabe.",
     "web_search_params": (
-        "Tomar provider er playground e Web Search ON korle je extra JSON field pathay, "
-        "hubohu seta JSON hishebe pathao (jemon {\"tools\": [...]}). Eta tokhoni jabe jokhon "
-        "Web Search toggle ON thakbe. Bondho korte \"off\" likho."
+        "Web Search param. Likho:\n"
+        "• default - ei provider type er jonno thik params\n"
+        "• client - bot nijei search kore AI ke result dey (jekono provider e cholbe)\n"
+        "• ba provider er JSON field hubohu (jemon {\"tools\": [...]})\n"
+        "• off - bondho\n"
+        "Provider param na bujhle bot nijei porer method e chole jabe."
     ),
     "thinking_params": (
-        "Tomar provider er playground e Thinking/Reasoning ON korle je extra JSON field "
-        "pathay, hubohu seta JSON hishebe pathao. Eta tokhoni jabe jokhon Thinking toggle ON "
-        "thakbe. Bondho korte \"off\" likho."
+        "Thinking param. Likho:\n"
+        "• default - ei provider type er jonno thik params\n"
+        "• prompt - <think> prompt diye (jekono model e cholbe)\n"
+        "• ba provider er JSON field hubohu (jemon {\"thinking\": {\"type\": \"enabled\", \"budget_tokens\": 4000}})\n"
+        "• off - bondho"
     ),
     "extra_params": (
         "Tomar provider er playground e web search / thinking ON korle je extra "
@@ -2723,6 +3279,8 @@ def settings_text():
         f"Intro message:\n{get_intro()}\n\n"
         f"System prompt: {len(get_system_prompt())} characters\n"
         f"Task mode: {'ON' if get_task_mode() else 'OFF'} (script/code/task banano)\n"
+        f"Task AI: {task_ai_label()}\n"
+        f"Search API: {'Tavily key set' if _tavily_key() else 'DuckDuckGo (free, key lage na)'}\n"
         f"Photo features: {'ON' if get_photo_mode() else 'OFF'} (customer er chobi dekha + edit)\n"
         f"Style copy: {'ON' if get_style_mode() else 'OFF'} ({style_stats()})"
     )
@@ -2735,6 +3293,8 @@ def settings_keyboard():
             f"🧰 Task mode: {'ON' if get_task_mode() else 'OFF'}",
             callback_data="s_task"
         )],
+        [InlineKeyboardButton(f"🤖 Task AI: {task_ai_label()}"[:60], callback_data="s_tai")],
+        [InlineKeyboardButton("🔎 Search API key (Tavily, optional)", callback_data="s_edit:tavily_key")],
         [InlineKeyboardButton(
             f"📷 Photo features: {'ON' if get_photo_mode() else 'OFF'}",
             callback_data="s_photo"
@@ -2996,21 +3556,43 @@ async def image_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def test_provider(p):
     """Small real request so wrong keys/models are caught immediately."""
     try:
-        r = requests.post(
-            p["url"],
-            headers={"Authorization": f"Bearer {p['key']}", "Content-Type": "application/json"},
-            json={
-                "model": p["models"][0],
-                "messages": [{"role": "user", "content": "Say hi in one word."}],
-                "max_tokens": 20,
-            },
-            timeout=20,
-        )
+        headers, payload = build_request(
+            p, p["models"][0], "", [{"role": "user", "content": "Say hi in one word."}], max_tokens=20)
+        r = send_chat(p, headers, payload, 25)
         if r.status_code == 200:
             return True, "OK"
-        return False, f"HTTP {r.status_code}"
+        return False, _api_error(r)
     except Exception as e:
         return False, f"{type(e).__name__}: {str(e)[:150]}"
+
+
+def test_features(p):
+    """Checks that Web Search + Thinking really work on this provider."""
+    model = p["models"][0]
+    q = "Who is the current Secretary-General of the United Nations? Think first, then answer in one line."
+    probe = dict(p)
+    probe["web_search_params"] = p.get("web_search_params") or default_params_for(p, "web_search")
+    probe["thinking_params"] = p.get("thinking_params") or default_params_for(p, "thinking")
+    try:
+        result, status, err = run_chat(probe, model, "You are a helpful assistant.",
+                                       [{"role": "user", "content": q}], ws=True, th=True, timeout=120)
+    except Exception as e:
+        return f"⚠️ {type(e).__name__}: {str(e)[:150]}"
+    if result is None:
+        return f"⚠️ Fail: {err or status}"
+    reply, think = split_think_tags((result["choices"][0]["message"].get("content") or ""))
+    modes = result.get("_modes") or {}
+    calls = [c for c in result.get("_tool_calls", []) if c.get("name") == "web_search"]
+    src_n = len((result.get("_extras") or {}).get("sources", []))
+    reasoning = bool((result.get("_reasoning") or "").strip() or think)
+    names = {"native": "provider er nijer feature", "tool": "bot-side search (tool)",
+             "inject": "bot search result prompt e boshiye", "prompt": "<think> prompt", None: "-"}
+    return (
+        f"🔎 Web Search: {names.get(modes.get('ws'))}"
+        f"{' - ' + str(len(calls)) + ' ta search' if calls else ''}{' - ' + str(src_n) + ' ta source' if src_n else ''}\n"
+        f"🧠 Thinking: {names.get(modes.get('th'))}{' - reasoning pawa gese' if reasoning else ''}\n\n"
+        f"Answer: {fit(reply, 300)}"
+    )
 
 
 async def providers_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -3129,7 +3711,7 @@ async def provider_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if new != "off" and not p.get(f"{kind}_params"):
             # Most providers use this same simple convention - filled in as a
             # default; ✏️ can override it for providers that need something else.
-            p[f"{kind}_params"] = dict(DEFAULT_EXTRA_PARAMS[kind])
+            p[f"{kind}_params"] = default_params_for(p, kind)
             msg += "\n(default params lagano hoyeche, ✏️ diye change korte paro)"
         await query.answer(msg, show_alert=True)
         save_providers()
@@ -3159,7 +3741,7 @@ async def provider_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.answer("Age API key dao", show_alert=True)
             return
         await query.answer("Model list anchi...")
-        ids, err = await asyncio.to_thread(fetch_models, api_base_from_url(p["url"]), p["key"])
+        ids, err = await asyncio.to_thread(fetch_models_for, p)
         ids = filter_models(ids, "chat")
         if err or not ids:
             await send_ephemeral(context, query.message.chat_id, query.message.reply_text(
@@ -3173,8 +3755,91 @@ async def provider_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await show(models_picker_text(ml), models_picker_keyboard(ml))
         return
 
+    if data == "p_addfetch":
+        st = context.user_data.get("setup")
+        if not st or st.get("step") != "model" or st.get("kind"):
+            await query.answer("Setup shesh ba purono - abar ➕ chapo", show_alert=True)
+            return
+        d, preset = st["data"], st["preset"]
+        tmp = {"url": resolve_url(d.get("url") or PRESETS[preset]["url"], d.get("account_id")),
+               "key": d["key"], "type": preset_type(preset)}
+        await query.answer("Model list anchi...")
+        ids, err = await asyncio.to_thread(fetch_models_for, tmp)
+        ids = filter_models(ids, "chat")
+        if err or not ids:
+            await send_ephemeral(context, query.message.chat_id, query.message.reply_text(
+                f"⚠️ Model list ana gelo na: {err or 'list khali'}\n\n"
+                "Ei provider /models support na-o korte pare - model er naam nijei likhe pathao.",
+                reply_markup=model_step_markup()
+            ))
+            return
+        ml = {"scope": "p", "pid": "new", "kind": "models", "name": d.get("name") or PRESETS[preset]["label"],
+              "models": ids, "page": 0, "adding": True, "picked": []}
+        context.user_data["mlist"] = ml
+        await show(models_picker_text(ml), models_picker_keyboard(ml))
+        return
+
+    if data == "p_adddone":
+        st = context.user_data.get("setup")
+        ml = context.user_data.get("mlist")
+        if not st or not ml or not ml.get("adding"):
+            await query.answer("Setup purono - abar ➕ chapo", show_alert=True)
+            return
+        if not ml.get("picked"):
+            await query.answer("Kom pokkhe 1 ta model tap koro", show_alert=True)
+            return
+        await query.answer("Adding...")
+        await finish_add_provider(context, query.message.chat_id, st, list(ml["picked"]))
+        return
+
+    if data.startswith("p_type:"):
+        p = find_provider(data.split(":", 1)[1])
+        if not p:
+            await query.answer()
+            return
+        new = "openai" if provider_type(p) == "anthropic" else "anthropic"
+        p["type"] = new
+        p["url"] = normalize_chat_url(api_base_from_url(p["url"]), new)
+        for kind in ("web_search", "thinking"):
+            if provider_mode(p, kind) != "off":
+                p[f"{kind}_params"] = default_params_for(p, kind)
+        save_providers()
+        await query.answer(f"API type: {new.upper()} ✅ (URL ar params update holo)", show_alert=True)
+        await show(detail_text(p), detail_keyboard(p))
+        return
+
+    if data.startswith("p_testfeat:"):
+        p = find_provider(data.split(":", 1)[1])
+        if not p:
+            await query.answer()
+            return
+        await query.answer("Test cholche, 1-2 minute lagte pare...", show_alert=True)
+        info = await asyncio.to_thread(test_features, p)
+        await send_ephemeral(context, query.message.chat_id, query.message.reply_text(
+            f"🧪 {p['name']}\n\n{info}", reply_markup=back_markup(f"p_open:{p['id']}")
+        ))
+        return
+
     if data.startswith("p_page:") or data.startswith("p_pick:"):
         ml = context.user_data.get("mlist")
+        if ml and ml.get("adding") and ml.get("scope") == "p":
+            num = int(data.split(":", 1)[1])
+            if data.startswith("p_page:"):
+                ml["page"] = max(0, num)
+                await query.answer()
+            elif 0 <= num < len(ml["models"]):
+                m = ml["models"][num]
+                if m in ml["picked"]:
+                    ml["picked"].remove(m)
+                    await query.answer(f"❌ {m} bad dilam")
+                else:
+                    ml["picked"].append(m)
+                    await query.answer(f"✅ {m} add holo")
+            else:
+                await query.answer()
+                return
+            await show(models_picker_text(ml), models_picker_keyboard(ml))
+            return
         p = find_provider(ml["pid"]) if ml and ml.get("scope") == "p" else None
         if not p:
             await query.answer("List purono hoye geche - abar 📥 chapo", show_alert=True)
@@ -3232,10 +3897,11 @@ async def provider_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data.startswith("p_add:"):
         preset = data.split(":", 1)[1]
         await query.answer()
-        if preset == "custom":
-            context.user_data["setup"] = {"step": "name", "preset": "custom", "data": {}}
+        if preset in CUSTOM_PRESETS:
+            context.user_data["setup"] = {"step": "name", "preset": preset, "data": {}}
+            kind_label = "Anthropic-compatible (/v1/messages)" if preset == "anthropic_custom" else "OpenAI-compatible"
             await send_ephemeral(context, query.message.chat_id, query.message.reply_text(
-                "Custom API (OpenAI-compatible)\n\nProvider er ekta naam pathao (jemon: MyAPI).\n/cancel diye bondho korte paro.",
+                f"Custom API ({kind_label})\n\nProvider er ekta naam pathao (jemon: MyAPI).\n/cancel diye bondho korte paro.",
                 reply_markup=back_markup("p_menu")
             ))
         elif preset == "cloudflare":
@@ -3269,6 +3935,92 @@ async def settings_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data.pop("setup", None)
         await query.answer()
         await edit_panel(context, query, settings_text(), settings_keyboard())
+        return
+
+    if data == "s_tai":
+        await query.answer()
+        cfg = load_settings()
+        rows = [[InlineKeyboardButton(
+            f"{'✅ ' if cfg.get('task_provider') == p['id'] else ''}{p['name'][:28]}",
+            callback_data=f"s_tai_p:{p['id']}")] for p in API_PROVIDERS]
+        rows.append([InlineKeyboardButton("♻️ Same as chat AI", callback_data="s_tai_clear")])
+        rows.append(nav_row("s_menu"))
+        await edit_panel(context, query,
+            f"🤖 Task AI\n\nEkhon: {task_ai_label()}\n\n"
+            "Script/code/task er jonno alada provider + model set koro. Normal chat e ager AI-i cholbe. "
+            "Task AI fail korle onno provider fallback hishebe cholbe.",
+            InlineKeyboardMarkup(rows))
+        return
+
+    if data == "s_tai_clear":
+        cfg = load_settings()
+        cfg.pop("task_provider", None)
+        cfg.pop("task_model", None)
+        save_settings(cfg)
+        await query.answer("Task AI = same as chat ✅")
+        await edit_panel(context, query, settings_text(), settings_keyboard())
+        return
+
+    if data.startswith("s_tai_p:") or data.startswith("s_tai_m:") or data.startswith("s_tai_f:"):
+        parts = data.split(":")
+        p = find_provider(parts[1])
+        if not p:
+            await query.answer("Provider nai", show_alert=True)
+            return
+        cfg = load_settings()
+        if data.startswith("s_tai_m:"):
+            idx = int(parts[2])
+            cfg["task_provider"] = p["id"]
+            cfg["task_model"] = p["models"][idx] if 0 <= idx < len(p["models"]) else ""
+            save_settings(cfg)
+            await query.answer("Task AI set ✅")
+            await edit_panel(context, query, settings_text(), settings_keyboard())
+            return
+        if data.startswith("s_tai_f:"):
+            await query.answer("Model list anchi...")
+            ids, err = await asyncio.to_thread(fetch_models_for, p)
+            ids = filter_models(ids, "chat")
+            if err or not ids:
+                await send_ephemeral(context, query.message.chat_id, query.message.reply_text(
+                    f"⚠️ Model list ana gelo na: {err or 'list khali'}", reply_markup=back_markup("s_tai")))
+                return
+            cfg["task_provider"] = p["id"]
+            save_settings(cfg)
+            ml = {"scope": "s", "pid": p["id"], "kind": "task_model", "name": p["name"], "models": ids, "page": 0}
+            context.user_data["mlist"] = ml
+            await edit_panel(context, query, models_picker_text(ml), models_picker_keyboard(ml))
+            return
+        # s_tai_p: provider chosen -> choose its model
+        cfg["task_provider"] = p["id"]
+        cfg["task_model"] = ""
+        save_settings(cfg)
+        await query.answer()
+        rows = [[InlineKeyboardButton(m[:60], callback_data=f"s_tai_m:{p['id']}:{i}")] for i, m in enumerate(p["models"][:40])]
+        rows.append([InlineKeyboardButton("Auto (prothom model, fail hole porerta)", callback_data=f"s_tai_m:{p['id']}:-1")])
+        rows.append([InlineKeyboardButton("📥 Provider theke model list", callback_data=f"s_tai_f:{p['id']}")])
+        rows.append(nav_row("s_tai"))
+        await edit_panel(context, query, f"🤖 {p['name']} - task er jonno kon model?", InlineKeyboardMarkup(rows))
+        return
+
+    if data.startswith("s_page:") or data.startswith("s_pick:"):
+        ml = context.user_data.get("mlist")
+        if not ml or ml.get("scope") != "s":
+            await query.answer("List purono hoye geche - abar Task AI theke shuru koro", show_alert=True)
+            return
+        num = int(data.split(":", 1)[1])
+        if data.startswith("s_page:"):
+            ml["page"] = max(0, num)
+            await query.answer()
+        elif 0 <= num < len(ml["models"]):
+            cfg = load_settings()
+            cfg["task_provider"] = ml["pid"]
+            cfg["task_model"] = ml["models"][num]
+            save_settings(cfg)
+            await query.answer(f"✅ Task AI: {ml['models'][num]}")
+        else:
+            await query.answer()
+            return
+        await edit_panel(context, query, models_picker_text(ml), models_picker_keyboard(ml))
         return
 
     if data == "s_task":
@@ -3351,7 +4103,7 @@ async def settings_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if data == "s_reset":
-        keep = {k: v for k, v in load_settings().items() if k in ("image_providers", "image_active")}
+        keep = {k: v for k, v in load_settings().items() if k in ("image_providers", "image_active", "task_provider", "task_model", "tavily_key")}
         save_settings(keep)
         await query.answer("Reset ✅")
         await edit_panel(context, query, settings_text(), settings_keyboard())
@@ -3364,6 +4116,8 @@ async def settings_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         labels = {
             "intro": "Notun intro message pathao.",
             "system_prompt": "Notun system prompt (AI er niyom/style) pathao.",
+            "tavily_key": "Tavily API key pathao (tavily.com te free). Bot nijei web search korle eta use hobe; "
+                          "na dile free DuckDuckGo use hobe. Muche felte - likho.",
         }
         await send_ephemeral(context, query.message.chat_id, query.message.reply_text(
             labels.get(field, "Notun value pathao.") + "\n/cancel diye bondho korte paro.",
@@ -3494,6 +4248,49 @@ async def daily_profile_buttons(update: Update, context: ContextTypes.DEFAULT_TY
         return
 
     await query.answer()
+
+
+def model_step_markup():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📥 Model list ano (provider theke)", callback_data="p_addfetch")],
+        nav_row("p_menu"),
+    ])
+
+
+async def finish_add_provider(context, chat_id, st, models):
+    """Creates the provider from the add-wizard data, tests it, makes it active."""
+    d, preset = st["data"], st["preset"]
+    base = PRESETS.get(preset) or {}
+    provider = {
+        "id": f"{preset}{int(time.time())}",
+        "name": d.get("name") or base.get("label", "Custom"),
+        "type": preset_type(preset),
+        "key": d["key"],
+        "url": resolve_url(d.get("url") or base.get("url", ""), d.get("account_id")),
+        "models": models,
+        "timeout": 25,
+        "web_search_mode": "off", "web_search_params": {},
+        "thinking_mode": "off", "thinking_params": {},
+        "vision": True, "vision_models": [],
+    }
+    context.user_data.pop("setup", None)
+    context.user_data.pop("mlist", None)
+
+    await send_ephemeral(context, chat_id, context.bot.send_message(
+        chat_id=chat_id, text="Testing... ⏳", reply_markup=back_markup("p_menu")))
+    ok, info = await asyncio.to_thread(test_provider, provider)
+
+    API_PROVIDERS.append(provider)
+    ACTIVE_PROVIDER["id"] = provider["id"]
+    save_providers()
+
+    if ok:
+        msg = f"✅ {provider['name']} add hoyeche ar active kora hoyeche. Test OK."
+    else:
+        msg = (f"⚠️ {provider['name']} add hoyeche kintu test fail: {info}\n"
+               f"Key/model/URL thik ache kina dekho. Dorkar hole delete kore abar add koro.")
+    await send_persist(context, chat_id, context.bot.send_message(
+        chat_id=chat_id, text=msg, reply_markup=providers_keyboard()))
 
 
 async def setup_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -3701,8 +4498,14 @@ async def setup_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         elif field == "vision_models":
             value = [] if text.strip() in ("-", "off", "default") else [m.strip() for m in text.split(",") if m.strip()]
         elif field in ("web_search_params", "thinking_params"):
-            if text.strip().lower() == "off":
+            low = text.strip().lower()
+            kind = field[:-len("_params")]
+            if low == "off":
                 value = {}
+            elif low in ("default", "auto", "native"):
+                value = default_params_for(p, kind)
+            elif low in ("client", "bot", "prompt"):
+                value = {CLIENT_WS: True} if kind == "web_search" else {PROMPT_TH: True}
             else:
                 try:
                     value = json.loads(text)
@@ -3722,7 +4525,7 @@ async def setup_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 ))
                 context.user_data["setup"] = st
                 return
-            value = normalize_chat_url(text)
+            value = normalize_chat_url(text, provider_type(p))
         else:
             value = text[:30] if field == "name" else text
 
@@ -3766,7 +4569,7 @@ async def setup_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "URL ta http:// ba https:// diye shuru hote hobe. Abar pathao.", reply_markup=back_markup("p_menu")
             ))
             return
-        d["url"] = normalize_chat_url(text)
+        d["url"] = normalize_chat_url(text, preset_type(preset))
         st["step"] = "key"
         await send_ephemeral(context, update.effective_chat.id, update.message.reply_text(
             f"✅ URL: {d['url']}\n\nEkhon API key pathao. (Ami delete kore dibo.)", reply_markup=back_markup("p_menu")
@@ -3776,55 +4579,28 @@ async def setup_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if step == "key":
         d["key"] = text
         st["step"] = "model"
-        if preset == "custom":
+        if preset in CUSTOM_PRESETS:
             hint = "Model er naam pathao (ekadhik hole comma diye alada koro)."
         else:
             hint = (f"Model er naam pathao, ba default use korte `default` likho.\n"
                     f"Default: {PRESETS[preset]['model']}")
+        hint += "\n\nAthoba niche 📥 chepe provider theke model list anao, tap kore baachai koro."
         await send_ephemeral(context, update.effective_chat.id, update.message.reply_text(
-            hint.replace("`", ""), reply_markup=back_markup("p_menu")
+            hint.replace("`", ""), reply_markup=model_step_markup()
         ))
         return
 
     if step == "model":
-        if preset != "custom" and text.lower() == "default":
+        if preset not in CUSTOM_PRESETS and text.lower() == "default":
             models = [PRESETS[preset]["model"]]
         else:
             models = [m.strip() for m in text.split(",") if m.strip()]
         if not models:
             await send_ephemeral(context, update.effective_chat.id, update.message.reply_text(
-                "Model naam dao.", reply_markup=back_markup("p_menu")
+                "Model naam dao.", reply_markup=model_step_markup()
             ))
             return
-
-        provider = {
-            "id": f"{preset}{int(time.time())}",
-            "name": d.get("name") or PRESETS[preset]["label"],
-            "key": d["key"],
-            "url": resolve_url(d.get("url") or PRESETS[preset]["url"], d.get("account_id")),
-            "models": models,
-            "timeout": 25,
-            "web_search_mode": "off", "web_search_params": {},
-            "thinking_mode": "off", "thinking_params": {},
-            "vision": True, "vision_models": [],
-        }
-        context.user_data.pop("setup", None)
-
-        await send_ephemeral(context, update.effective_chat.id, update.message.reply_text(
-            "Testing... ⏳", reply_markup=back_markup("p_menu")
-        ))
-        ok, info = await asyncio.to_thread(test_provider, provider)
-
-        API_PROVIDERS.append(provider)
-        ACTIVE_PROVIDER["id"] = provider["id"]
-        save_providers()
-
-        if ok:
-            msg = f"✅ {provider['name']} add hoyeche ar active kora hoyeche. Test OK."
-        else:
-            msg = (f"⚠️ {provider['name']} add hoyeche kintu test fail: {info}\n"
-                   f"Key/model/URL thik ache kina dekho. Dorkar hole delete kore abar add koro.")
-        await send_persist(context, update.effective_chat.id, update.message.reply_text(msg, reply_markup=providers_keyboard()))
+        await finish_add_provider(context, update.effective_chat.id, st, models)
         return
 
 
@@ -4601,7 +5377,7 @@ async def handle_business_message(
         task_wait_msg = None
         if will_run_task_mode(user_text):
             try:
-                active_model = (ordered_providers()[0]["models"][0]) if ordered_providers() else "AI"
+                active_model = task_display_model()
                 task_wait_msg = await context.bot.send_message(
                     chat_id=chat_id,
                     text=f"⌛ Please wait, {active_model} is working on your task. "

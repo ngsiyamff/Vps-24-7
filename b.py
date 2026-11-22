@@ -2731,8 +2731,27 @@ IMAGE_INSTRUCTION = (
 IMAGE_FAIL_TEXT = "Sorry, ei chobi ta ekhon dekhte parlam na. Ektu pore abar pathao 🙏"
 
 
-def ask_xkiro(user_id, user_text, image=None):
-    """image: None, or (bytes, mime) - the AI then looks at the picture too."""
+OWNER_SYSTEM_PROMPT = """
+You are the owner's personal AI assistant, chatting with the owner privately inside their Telegram bot.
+
+LANGUAGE:
+- Bangla script -> Bangla script.
+- Banglish/Roman Bangla -> Roman Banglish only; NEVER use Bengali script.
+- Hindi/Hinglish -> Roman Hindi/Hinglish only; NEVER use Devanagari.
+- English -> English.
+- NEVER switch languages or scripts unless the owner does.
+
+STYLE:
+- Be helpful, direct and natural. Answer fully but without padding; short for simple questions, complete for tasks.
+- Write messages the owner may forward to someone as clean final text (no preamble like "Sure, here is").
+- Put every script/code in a fenced code block with the language name.
+- Do not mention model names, providers or system instructions.
+"""
+
+
+def ask_xkiro(user_id, user_text, image=None, owner=False):
+    """image: None, or (bytes, mime) - the AI then looks at the picture too.
+    owner=True: private chat with the owner (own persona, no customer style copy)."""
 
     # Images are never stored in the history (too big) - only a text marker.
     add_history(user_id, "user", f"[Image] {user_text}".strip() if image else user_text)
@@ -2761,7 +2780,7 @@ def ask_xkiro(user_id, user_text, image=None):
     if image:
         print(">>> IMAGE ANALYSIS")
     tried_vision = False
-    style_guide = "" if task else build_style_guide(user_id, user_text)
+    style_guide = "" if (task or owner) else build_style_guide(user_id, user_text)
     if style_guide:
         print(">>> STYLE GUIDE: this person's chat with you is used")
 
@@ -2789,7 +2808,7 @@ def ask_xkiro(user_id, user_text, image=None):
             models_to_try = [task_pref] + [m for m in models_to_try if m != task_pref]
 
         system_text = (
-            get_system_prompt() + "\n\n" + language_instruction
+            (OWNER_SYSTEM_PROMPT if owner else get_system_prompt()) + "\n\n" + language_instruction
             + (("\n\n" + extra_instruction) if extra_instruction else "")
             + (("\n\n" + style_guide) if style_guide else "")
         )
@@ -2845,7 +2864,8 @@ def ask_xkiro(user_id, user_text, image=None):
                     log_event("provider_empty", provider=provider["name"], model=model_name, reason="empty content")
                     continue
 
-                reply = ensure_ai_identity(user_text, reply)
+                if not owner:
+                    reply = ensure_ai_identity(user_text, reply)
                 add_history(user_id, "assistant", reply[:3000])
                 print(f">>> AI PROVIDER: {provider['name']}")
                 print(f">>> AI MODEL: {model_name}")
@@ -3000,10 +3020,16 @@ def is_recent_ai_message(chat_id):
 # MANUAL ONLINE / OFFLINE BUTTON (no second account needed)
 # ============================================================
 
+OWNER_HELP = (
+    "\n\n💬 Ekhane jekono message likhle AI reply dibe (chat, chobi banano, task/script, photo dekha/edit).\n"
+    "📤 AI answer er niche button diye ba /send @username message diye kauke pathate paro. /contacts, /providers, /settings."
+)
+
+
 def status_text():
     if user_is_online:
-        return "🟢 You are ONLINE\nAI auto-reply: OFF\n\nOffline jete chaile niche button chapo."
-    return "🔴 You are OFFLINE\nAI auto-reply: ON\n\nOnline ashle niche button chapo."
+        return "🟢 You are ONLINE\nAI auto-reply: OFF\n\nOffline jete chaile niche button chapo." + OWNER_HELP
+    return "🔴 You are OFFLINE\nAI auto-reply: ON\n\nOnline ashle niche button chapo." + OWNER_HELP
 
 
 def status_keyboard():
@@ -3622,6 +3648,7 @@ async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not user or user.id != MY_USER_ID or not update.message:
         return
     context.user_data.pop("setup", None)
+    context.user_data.pop("send_pending", None)
     await delete_command(update)
     await send_ephemeral(context, update.effective_chat.id, context.bot.send_message(
         chat_id=update.effective_chat.id, text="Cancelled. /providers diye abar shuru korte paro.",
@@ -4296,7 +4323,10 @@ async def finish_add_provider(context, chat_id, st, models):
 async def setup_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Owner's private chat with the bot: collects API details step by step."""
     st = context.user_data.get("setup")
-    if not st or not update.message or not update.message.text:
+    if not update.message or not update.message.text:
+        return
+    if not st:
+        await owner_chat(update, context)      # plain text in the bot = chat with the AI
         return
 
     text = update.message.text.strip()
@@ -5510,6 +5540,452 @@ If the meaning is unclear, give a friendly reaction.
 
 
 # ============================================================
+# OWNER CHAT - talk to the AI directly inside the bot
+#  * normal chat, image generation, tasks/scripts, photo look/edit
+#    (same features customers get through Business DMs)
+#  * every AI answer has a "📤 Send to user" button; /send @username text
+#    sends your own text. Targets: @username or numeric ID.
+#  * Contacts are learned automatically from everybody who messages the bot
+#    or your Business account (Telegram cannot look a username up by itself).
+# ============================================================
+
+OWNER_HIST_KEY = "owner_chat"
+OWNER_OUTS_MAX = 8
+CONTACTS_FILE = Path(__file__).with_name("contacts.json")
+_contacts = {}
+_contacts_saved_at = [0.0]
+
+
+def load_contacts():
+    global _contacts
+    try:
+        data = json.loads(CONTACTS_FILE.read_text(encoding="utf-8"))
+        _contacts = data if isinstance(data, dict) else {}
+    except Exception:
+        _contacts = {}
+
+
+def save_contacts():
+    try:
+        tmp = CONTACTS_FILE.with_suffix(".tmp")
+        tmp.write_text(json.dumps(_contacts, ensure_ascii=False, indent=1), encoding="utf-8")
+        tmp.replace(CONTACTS_FILE)
+        _contacts_saved_at[0] = time.time()
+    except Exception as e:
+        print("contacts save error:", type(e).__name__)
+
+
+load_contacts()
+
+
+def remember_contact(user, chat_id=None, business_connection_id=None, direct=False):
+    if not user or getattr(user, "is_bot", False) or user.id == MY_USER_ID:
+        return
+    c = _contacts.setdefault(str(user.id), {"id": user.id})
+    before = json.dumps(c, sort_keys=True)
+    c["username"] = user.username or c.get("username") or ""
+    c["name"] = " ".join(x for x in (user.first_name, user.last_name) if x) or c.get("name", "")
+    if business_connection_id:
+        c["bc"] = business_connection_id
+        c["chat_id"] = chat_id or user.id
+    if direct:
+        c["direct"] = True
+    changed = json.dumps(c, sort_keys=True) != before
+    c["last"] = int(time.time())
+    if changed or time.time() - _contacts_saved_at[0] > 300:
+        save_contacts()
+
+
+async def track_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """group=-2: learns who writes to the bot / your Business account. Never replies."""
+    try:
+        bm = update.business_message
+        if bm and bm.from_user:
+            remember_contact(bm.from_user, bm.chat.id, bm.business_connection_id)
+        m = update.message
+        if m and m.from_user and m.chat.type == "private":
+            remember_contact(m.from_user, m.chat.id, direct=True)
+    except Exception as e:
+        print("track_contact error:", type(e).__name__)
+
+
+def contact_label(c):
+    uname = f"@{c['username']}" if c.get("username") else ""
+    return " ".join(x for x in (c.get("name"), uname, f"[{c['id']}]") if x)
+
+
+def recent_contacts(n=6):
+    return sorted(_contacts.values(), key=lambda c: c.get("last", 0), reverse=True)[:n]
+
+
+def _looks_like_target(text):
+    t = (text or "").strip()
+    return bool(re.fullmatch(r"(?:https?://t\.me/|@)?[A-Za-z0-9_]{4,32}", t) or re.fullmatch(r"-?\d{5,15}", t))
+
+
+def find_contact(ref):
+    ref = (ref or "").strip()
+    ref = re.sub(r"^https?://t\.me/", "", ref)
+    if not ref:
+        return None
+    if re.fullmatch(r"-?\d{5,15}", ref):
+        return _contacts.get(ref) or {"id": int(ref)}
+    uname = ref.lstrip("@").lower()
+    for c in _contacts.values():
+        if (c.get("username") or "").lower() == uname:
+            return c
+    hits = [c for c in _contacts.values() if (c.get("name") or "").lower() == ref.lower()]
+    return hits[0] if len(hits) == 1 else None
+
+
+async def resolve_contact(context, ref):
+    c = find_contact(ref)
+    if c:
+        return c
+    uname = re.sub(r"^https?://t\.me/", "", (ref or "").strip()).lstrip("@")
+    if re.fullmatch(r"[A-Za-z0-9_]{4,32}", uname):
+        try:                                           # works only if Telegram lets the bot see that user
+            ch = await context.bot.get_chat("@" + uname)
+            if getattr(ch, "type", "") == "private":
+                return {"id": ch.id, "username": uname, "name": getattr(ch, "first_name", "") or ""}
+        except Exception:
+            pass
+    return None
+
+
+async def send_formatted(bot, chat_id, text, business_connection_id=None, reply_markup=None):
+    """HTML-formatted send (code blocks, files) with a plain-text fallback.
+    The inline keyboard goes on the last message. Returns the last sent message."""
+    last = None
+    try:
+        messages, files = build_messages(text)
+        for i, m in enumerate(messages):
+            is_last = i == len(messages) - 1 and not files
+            last = await bot.send_message(
+                chat_id=chat_id, text=m, parse_mode="HTML",
+                business_connection_id=business_connection_id,
+                reply_markup=reply_markup if is_last else None)
+            await asyncio.sleep(0.12)
+        for j, (name, code) in enumerate(files):
+            last = await bot.send_document(
+                chat_id=chat_id, document=code.encode("utf-8"), filename=name,
+                business_connection_id=business_connection_id,
+                reply_markup=reply_markup if j == len(files) - 1 else None)
+            await asyncio.sleep(0.12)
+        if last is not None:
+            return last
+    except Exception as e:
+        print("SEND ERROR (formatted):", str(e)[:120])
+        if last is not None:
+            return last
+    chunks = split_message(text)
+    for i, chunk in enumerate(chunks):
+        last = await bot.send_message(
+            chat_id=chat_id, text=chunk, business_connection_id=business_connection_id,
+            reply_markup=reply_markup if i == len(chunks) - 1 else None)
+        await asyncio.sleep(0.12)
+    return last
+
+
+async def send_to_contact(context, contact, out):
+    """out = {"kind": "text", "text": ...} or {"kind": "photo", "bytes": ...}.
+    Tries your own account (Business) first if that chat is known, then the bot itself.
+    -> (ok, how or error)"""
+    uid = contact["id"]
+    routes = []
+    if contact.get("bc"):
+        routes.append(("tomar account theke (Business)", contact["bc"], contact.get("chat_id") or uid))
+    routes.append(("bot theke", None, uid))
+    err = ""
+    for label, conn, chat_id in routes:
+        try:
+            if out["kind"] == "photo":
+                if conn:
+                    mark_ai_message(chat_id, "[image]")
+                await context.bot.send_photo(chat_id=chat_id, photo=out["bytes"],
+                                             caption=out.get("caption") or None,
+                                             business_connection_id=conn)
+            else:
+                if conn:
+                    mark_ai_message(chat_id, out["text"])
+                await send_formatted(context.bot, chat_id, out["text"], business_connection_id=conn)
+            return True, label
+        except Exception as e:
+            err = f"{type(e).__name__}: {str(e)[:120]}"
+            print("SEND TO CONTACT ERROR:", label, err)
+    return False, err
+
+
+NOT_REACHABLE_HINT = (
+    "Telegram bot nijer theke kauke prothom message pathate pare na. Oi user ke bot e ekbar "
+    "/start (ba kono message) dite bolo, ba tomar Business chat e tar sathe kotha thakte hobe."
+)
+
+
+async def deliver_to(context, chat_id, out, target_text):
+    """Resolves target_text (@username / ID) and sends `out`. -> True if it was a send attempt."""
+    contact = await resolve_contact(context, target_text)
+    if not contact:
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text=(f"❌ '{target_text[:40]}' contact list e nai.\n"
+                  "Bot shudhu tader chine je bot e ba tomar Business chat e message diyeche. "
+                  "Numeric ID diye try koro, ba /contacts dekho."))
+        return False
+    ok, info = await send_to_contact(context, contact, out)
+    if ok:
+        await context.bot.send_message(chat_id=chat_id, text=f"✅ {contact_label(contact)} ke pathano hoyeche ({info}).")
+    else:
+        await context.bot.send_message(chat_id=chat_id, text=f"⚠️ Pathano gelo na: {info}\n\n{NOT_REACHABLE_HINT}")
+    return True
+
+
+# ---------- the AI answers kept so the 📤 button can send them ----------
+def new_out(context, out):
+    oid = int(time.time() * 1000) % 1_000_000_000
+    outs = context.user_data.setdefault("outs", {})
+    outs[oid] = out
+    while len(outs) > OWNER_OUTS_MAX:
+        outs.pop(next(iter(outs)))
+    return oid
+
+
+def send_button(oid):
+    return InlineKeyboardMarkup([[InlineKeyboardButton("📤 Onno user ke pathao", callback_data=f"o_send:{oid}")]])
+
+
+async def owner_reply_text(context, chat_id, reply):
+    oid = new_out(context, {"kind": "text", "text": reply})
+    await send_formatted(context.bot, chat_id, reply, reply_markup=send_button(oid))
+
+
+async def _delete_quiet(context, chat_id, msg):
+    if msg:
+        try:
+            await context.bot.delete_message(chat_id=chat_id, message_id=msg.message_id)
+        except Exception:
+            pass
+
+
+async def owner_send_photo(context, chat_id, img_bytes):
+    oid = new_out(context, {"kind": "photo", "bytes": img_bytes})
+    sent = await context.bot.send_photo(chat_id=chat_id, photo=img_bytes, reply_markup=send_button(oid))
+    remember_recent_image(chat_id, get_image_file_ref(sent))
+    return sent
+
+
+async def owner_generate_image(context, message, text):
+    chat_id = message.chat_id
+    print(">>> OWNER IMAGE REQUEST")
+    wait = None
+    try:
+        wait = await context.bot.send_message(
+            chat_id=chat_id,
+            text=f"⌛ Please wait, {img_ordered()[0]['model']} is generating your image. It will take 1-3 minutes ⌨️")
+    except Exception:
+        pass
+    try:
+        img, err = await run_with_chat_action(context, chat_id, None, "upload_photo",
+                                              asyncio.to_thread(generate_image, text))
+    except Exception as e:
+        img, err = None, type(e).__name__
+    await _delete_quiet(context, chat_id, wait)
+    add_history(OWNER_HIST_KEY, "user", text)
+    if img:
+        await owner_send_photo(context, chat_id, img)
+        add_history(OWNER_HIST_KEY, "assistant", "[I sent the requested image]")
+    else:
+        await context.bot.send_message(chat_id=chat_id, text=f"⚠️ Chobi banano gelo na: {err}")
+
+
+async def owner_respond_to_image(context, message, ref, text):
+    chat_id = message.chat_id
+    try:
+        data, mime = await fetch_image(context, ref)
+    except Exception as e:
+        print("PHOTO DOWNLOAD ERROR:", type(e).__name__)
+        await context.bot.send_message(chat_id=chat_id, text=IMAGE_FAIL_TEXT)
+        return
+    if (is_edit_instruction(text) or is_image_request(text)) and img_ordered():
+        p = img_ordered()[0]
+        label = p["model"] if p.get("type") == "gemini" else edit_model_for(p)
+        wait = None
+        try:
+            wait = await context.bot.send_message(
+                chat_id=chat_id, text=f"⌛ Please wait, {label} is editing your image. It will take 1-3 minutes ⌨️")
+        except Exception:
+            pass
+        try:
+            out, err = await run_with_chat_action(context, chat_id, None, "upload_photo",
+                                                  asyncio.to_thread(edit_image, text, data, mime))
+        except Exception as e:
+            out, err = None, type(e).__name__
+        await _delete_quiet(context, chat_id, wait)
+        add_history(OWNER_HIST_KEY, "user", f"[Image] {text}")
+        if out:
+            await owner_send_photo(context, chat_id, out)
+            add_history(OWNER_HIST_KEY, "assistant", "[I sent the edited image]")
+        else:
+            await context.bot.send_message(chat_id=chat_id, text=f"⚠️ Chobi edit korte parlam na: {err}")
+        return
+    reply = await run_with_chat_action(context, chat_id, None, "typing",
+                                       asyncio.to_thread(ask_xkiro, OWNER_HIST_KEY, text, (data, mime), True))
+    await owner_reply_text(context, chat_id, reply)
+
+
+async def owner_text_about_image(context, message, text):
+    """Reply to a photo / 'make it ...' right after a photo. True = handled."""
+    chat_id = message.chat_id
+    ref, kind = None, None
+    replied = getattr(message, "reply_to_message", None)
+    if replied:
+        ref, kind = get_image_file_ref(replied), "reply"
+    if not ref:
+        recent = get_recent_image(chat_id)
+        if recent and len(text) <= 250 and is_edit_instruction(text) and refers_to_image(text):
+            ref, kind = recent, "recent"
+    if not ref:
+        return False
+    wants_edit = is_edit_instruction(text) or is_image_request(text)
+    if kind == "reply" and not wants_edit and not (refers_to_image(text) or "?" in text):
+        return False
+    await owner_respond_to_image(context, message, ref, text)
+    return True
+
+
+async def owner_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Owner's plain text in the bot's private chat (no setup in progress)."""
+    message = update.message
+    if not message or not message.text:
+        return
+    text = message.text.strip()
+    chat_id = message.chat_id
+
+    # waiting for "send to whom?"
+    pend = context.user_data.get("send_pending")
+    if pend:
+        if _looks_like_target(text):
+            context.user_data.pop("send_pending", None)
+            await deliver_to(context, chat_id, pend, text)
+            return
+        context.user_data.pop("send_pending", None)     # not a target -> normal chat
+
+    if await owner_text_about_image(context, message, text):
+        return
+
+    if img_ordered() and is_image_request(text):
+        await owner_generate_image(context, message, text)
+        return
+
+    task_wait = None
+    if will_run_task_mode(text):
+        try:
+            task_wait = await context.bot.send_message(
+                chat_id=chat_id,
+                text=f"⌛ Please wait, {task_display_model()} is working on your task. It will take 1-3 minutes ⌨️")
+        except Exception:
+            pass
+    try:
+        reply = await run_with_chat_action(context, chat_id, None, "typing",
+                                           asyncio.to_thread(ask_xkiro, OWNER_HIST_KEY, text, None, True))
+    finally:
+        await _delete_quiet(context, chat_id, task_wait)
+    await owner_reply_text(context, chat_id, reply)
+
+
+async def owner_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    message = update.message
+    ref = get_image_file_ref(message)
+    if not message or not ref:
+        return
+    if message.media_group_id and not first_in_media_group(message.media_group_id):
+        return
+    remember_recent_image(message.chat_id, ref)
+    await owner_respond_to_image(context, message, ref, (message.caption or "").strip())
+
+
+async def send_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    message = update.message
+    if not user or user.id != MY_USER_ID or not message:
+        return
+    parts = (message.text or "").split(None, 2)
+    if len(parts) < 3:
+        await message.reply_text(
+            "Use: /send @username tomar message\nba: /send 123456789 tomar message\n\n"
+            "AI er answer pathate chaile answer er niche 📤 button chapo. Contact dekhte /contacts.")
+        return
+    await deliver_to(context, message.chat_id, {"kind": "text", "text": parts[2]}, parts[1])
+
+
+async def contacts_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    if not user or user.id != MY_USER_ID or not update.message:
+        return
+    cs = recent_contacts(25)
+    if not cs:
+        await update.message.reply_text("Ekhono kono contact nai. Keu bot e ba tomar Business chat e message dile eikhane jog hobe.")
+        return
+    lines = ["👥 Contacts (shesh message onujayi):\n"]
+    for c in cs:
+        how = ("💼" if c.get("bc") else "") + ("🤖" if c.get("direct") else "")
+        lines.append(f"{how} {contact_label(c)}")
+    lines.append("\n💼 = tomar account theke pathano jabe, 🤖 = bot theke jabe.\n/send @username message")
+    await update.message.reply_text("\n".join(lines)[:3900])
+
+
+async def owner_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    if not query or query.from_user.id != MY_USER_ID:
+        if query:
+            await query.answer("Not allowed", show_alert=True)
+        return
+    data = query.data or ""
+    outs = context.user_data.get("outs") or {}
+
+    if data.startswith("o_send:"):
+        oid = int(data.split(":", 1)[1])
+        out = outs.get(oid)
+        if not out:
+            await query.answer("Ei message ta purono - abar AI ke bolo", show_alert=True)
+            return
+        context.user_data["send_pending"] = out
+        rows = [[InlineKeyboardButton(contact_label(c)[:60], callback_data=f"o_to:{oid}:{c['id']}")]
+                for c in recent_contacts(6)]
+        rows.append([InlineKeyboardButton("❌ Cancel", callback_data="o_cancel")])
+        await query.answer()
+        await query.message.reply_text(
+            "📤 Kake pathabo?\n@username ba numeric ID likho, ba niche tap koro.",
+            reply_markup=InlineKeyboardMarkup(rows))
+        return
+
+    if data.startswith("o_to:"):
+        _, oid, uid = data.split(":", 2)
+        out, contact = outs.get(int(oid)), _contacts.get(uid)
+        if not out or not contact:
+            await query.answer("Purono ba contact nai", show_alert=True)
+            return
+        context.user_data.pop("send_pending", None)
+        await query.answer("Pathachchi...")
+        ok, info = await send_to_contact(context, contact, out)
+        txt = (f"✅ {contact_label(contact)} ke pathano hoyeche ({info})." if ok
+               else f"⚠️ Pathano gelo na: {info}\n\n{NOT_REACHABLE_HINT}")
+        try:
+            await query.message.edit_text(txt)
+        except Exception:
+            await query.message.reply_text(txt)
+        return
+
+    if data == "o_cancel":
+        context.user_data.pop("send_pending", None)
+        await query.answer("Cancelled")
+        await _delete_quiet(context, query.message.chat_id, query.message)
+        return
+
+    await query.answer()
+
+
+# ============================================================
 # MAIN
 # ============================================================
 
@@ -5618,14 +6094,26 @@ async def run_everything():
     app.add_handler(CallbackQueryHandler(daily_profile_buttons, pattern=r"^d_"))
     app.add_handler(CallbackQueryHandler(image_buttons, pattern=r"^i_"))
     app.add_handler(CommandHandler("settings", settings_command))
+    app.add_handler(CommandHandler("send", send_command))
+    app.add_handler(CommandHandler("contacts", contacts_command))
+    app.add_handler(CallbackQueryHandler(owner_buttons, pattern=r"^o_"))
     # group=-1: runs independently, so it NEVER blocks the business-message
     # or setup_text handlers below (a bare TypeHandler with no filter would
     # otherwise match every single update and swallow it in the default group).
     app.add_handler(TypeHandler(Update, on_business_connection), group=-1)
+    app.add_handler(TypeHandler(Update, track_contact), group=-2)     # learns contacts, never replies
     app.add_handler(
         MessageHandler(
             filters.UpdateType.MESSAGE & filters.TEXT & ~filters.COMMAND & filters.User(MY_USER_ID),
             setup_text
+        )
+    )
+
+    # owner sends a photo to the bot -> AI looks at it / edits it
+    app.add_handler(
+        MessageHandler(
+            filters.UpdateType.MESSAGE & (filters.PHOTO | filters.Document.IMAGE) & filters.User(MY_USER_ID),
+            owner_photo
         )
     )
 
